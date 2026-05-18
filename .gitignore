@@ -1,0 +1,54 @@
+# ==========================================
+# AI-Workspace Blueprint .gitignore
+# 本仓库只跟踪骨架与文档，业务数据全部忽略
+# ==========================================
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Obsidian 工作区状态（结构同步，状态本地化）
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/plugins/*/data.json
+
+# 密钥 / 环境变量
+*.env
+*.env.*
+!*.env.example
+secrets/
+**/secrets/*
+!**/secrets/.gitkeep
+!**/secrets/README.md
+
+# 日志 / 临时
+*.log
+logs/
+tmp/
+.cache/
+
+# Python / Node 常见运行产物
+__pycache__/
+*.pyc
+node_modules/
+dist/
+build/
+
+# 大文件 / 媒体
+*.zip
+*.tar.gz
+*.7z
+*.mp4
+*.mov
+
+# Sandbox 默认不入库（实验性）
+70-Sandbox/**
+!70-Sandbox/_about.md
+!70-Sandbox/.gitkeep

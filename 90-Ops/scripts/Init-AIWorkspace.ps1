@@ -9,8 +9,9 @@
     - 从 -Source（本蓝图仓库 clone 出来的目录）复制文档（_about.md / README.md / SOP）
     - 生成 .machine-id（标记本机角色）
     - 生成 secrets/ 子目录占位
-    - 生成 .stignore（如果 90-Ops/sync/stignore/ 提供模板）
-    - 默认不覆盖已存在的业务文件，仅 -Force 时覆盖文档
+    - 安装 Wiki 模板（10-Hermes-Wiki/99-Templates/，copy-if-missing）
+    - 安装 Syncthing .stignore（如果 90-Ops/sync/stignore/ 提供模板）
+    - 默认不覆盖已存在的业务文件，仅 -Force 时覆盖文档与模板
     可重复执行，每次只补齐缺失项。
 
 .PARAMETER Source
@@ -27,7 +28,8 @@
     本机标识（写入 .machine-id）。默认 = $env:COMPUTERNAME
 
 .PARAMETER Force
-    覆盖已有文档（_about.md / README.md / 三份 SOP）。**不会**覆盖业务数据。
+    覆盖已有文档（_about.md / README.md / 三份 SOP）与已有 Wiki 模板（99-Templates/）。
+    **不会**覆盖业务数据（笔记、代码、运行期产物）。
 
 .PARAMETER DryRun
     只打印将要执行的操作，不真正改文件系统。
@@ -342,6 +344,96 @@ function Install-StIgnore {
     }
 }
 
+function Install-Templates {
+    <#
+    .SYNOPSIS
+        把 Wiki 模板（10-Hermes-Wiki/99-Templates/）安装到目标工作区。
+
+    .DESCRIPTION
+        - 整目录递归扫描源端模板（含 _about.md 与所有 TPL-*.md / 子目录）
+        - 默认 copy-if-missing：目标已存在 → 输出 SKIP 提示，不动文件
+        - 仅当 -Force 显式启用时才覆盖目标
+        - DryRun 模式：列出**每个**会被复制或跳过的模板文件
+        - 路径锁定为 10-Hermes-Wiki/99-Templates/（与产出落地约定一致）
+    #>
+    param(
+        [string]$SrcRoot,
+        [string]$DstRoot
+    )
+
+    $relativeRoot = '10-Hermes-Wiki/99-Templates'
+    $srcDir = Join-Path $SrcRoot $relativeRoot
+    $dstDir = Join-Path $DstRoot $relativeRoot
+
+    if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) {
+        Write-Step "Wiki 模板源目录不存在，跳过模板安装: $srcDir" 'WARN'
+        return
+    }
+
+    # 确保目标目录存在
+    if (-not (Test-Path -LiteralPath $dstDir -PathType Container)) {
+        if ($DryRun) {
+            Write-Step "将创建目录: $relativeRoot" 'INFO'
+        } else {
+            New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
+            Write-Step "创建目录: $relativeRoot" 'OK'
+        }
+    }
+
+    # 递归列出所有模板文件（排除 .gitkeep）
+    $files = Get-ChildItem -LiteralPath $srcDir -Recurse -File `
+                | Where-Object { $_.Name -ne '.gitkeep' }
+
+    if (-not $files -or $files.Count -eq 0) {
+        Write-Step '模板目录为空，无文件可安装' 'WARN'
+        return
+    }
+
+    $countCopy = 0
+    $countSkip = 0
+    $countOverwrite = 0
+
+    foreach ($f in $files) {
+        # 计算相对路径（兼容子目录）
+        $relativeFile = $f.FullName.Substring($srcDir.Length).TrimStart('\', '/')
+        $dst = Join-Path $dstDir $relativeFile
+        $displayPath = "$relativeRoot/$($relativeFile -replace '\\', '/')"
+
+        # 父目录（如模板有子目录结构）
+        $dstParent = Split-Path $dst -Parent
+        if (-not (Test-Path -LiteralPath $dstParent)) {
+            if (-not $DryRun) {
+                New-Item -ItemType Directory -Path $dstParent -Force | Out-Null
+            }
+        }
+
+        if (Test-Path -LiteralPath $dst) {
+            if ($Force) {
+                # 覆盖路径
+                Write-Step "覆盖模板: $displayPath" 'WARN'
+                if (-not $DryRun) {
+                    Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
+                }
+                $countOverwrite++
+            } else {
+                # copy-if-missing：跳过
+                Write-Step "模板已存在（用 -Force 覆盖）: $displayPath" 'SKIP'
+                $countSkip++
+            }
+        } else {
+            # 新增
+            Write-Step "复制模板: $displayPath" 'OK'
+            if (-not $DryRun) {
+                Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
+            }
+            $countCopy++
+        }
+    }
+
+    # 小结
+    Write-Step "模板安装小结: 新增 $countCopy / 覆盖 $countOverwrite / 跳过 $countSkip （共 $($files.Count) 文件）" 'INFO'
+}
+
 # ============================================================
 # 3) 预检
 # ============================================================
@@ -391,7 +483,7 @@ Ensure-Dir -Path $Target
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 1/4: 创建目录骨架' 'INFO'
+Write-Step '阶段 1/5: 创建目录骨架' 'INFO'
 foreach ($d in $Directories) {
     Ensure-Dir -Path (Join-Path $Target $d)
 }
@@ -401,7 +493,7 @@ foreach ($d in $Directories) {
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 2/4: 复制文档（_about / SOP / README）' 'INFO'
+Write-Step '阶段 2/5: 复制文档（_about / SOP / README）' 'INFO'
 foreach ($f in $DocFiles) {
     Copy-Doc -SrcRoot $Source -DstRoot $Target -Relative $f
 }
@@ -411,7 +503,7 @@ foreach ($f in $DocFiles) {
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 3/4: 生成本机标识与配置文件' 'INFO'
+Write-Step '阶段 3/5: 生成本机标识与配置文件' 'INFO'
 
 if ($Role) {
     $machineIdPath = Join-Path $Target '.machine-id'
@@ -449,11 +541,19 @@ foreach ($scope in @('shared', 'phase2', 'phase3', 'phase4', 'hermes', 'intel'))
 }
 
 # ============================================================
-# 8) 安装 Syncthing .stignore
+# 8) 安装 Wiki 模板 (10-Hermes-Wiki/99-Templates/)
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 4/4: 安装 Syncthing .stignore（如有模板）' 'INFO'
+Write-Step '阶段 4/5: 安装 Wiki 模板（99-Templates/）' 'INFO'
+Install-Templates -SrcRoot $Source -DstRoot $Target
+
+# ============================================================
+# 9) 安装 Syncthing .stignore
+# ============================================================
+
+Write-Host ''
+Write-Step '阶段 5/5: 安装 Syncthing .stignore（如有模板）' 'INFO'
 Install-StIgnore -SrcRoot $Source -DstRoot $Target -Shares $SyncShares
 
 # ============================================================

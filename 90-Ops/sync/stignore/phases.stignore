@@ -1,0 +1,70 @@
+// ============================================================
+// .stignore for samuel-aiws-phases  (30-Phases/)
+// 安装位置: <Target>/30-Phases/.stignore
+// ============================================================
+
+// Git
+.git
+.gitignore
+
+// 依赖（任何子项目下都忽略）
+**/node_modules
+**/.pnpm-store
+**/.yarn
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+**/env
+
+// 构建产物
+**/dist
+**/build
+**/.next
+**/.nuxt
+**/.turbo
+**/.cache
+**/.parcel-cache
+**/coverage
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+// 环境变量（绝不同步真值，模板入 git）
+**/.env
+**/.env.*
+!**/.env.example
+
+// 长跑任务输出（按机器隔离，避免覆盖）
+**/runs/
+**/outputs/
+**/checkpoints/
+**/wandb/
+**/mlruns/
+
+// 数据 / 数据库（量化策略的本地行情库）
+**/data/
+**/datasets/
+**/*.parquet
+**/*.feather
+**/*.duckdb
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+
+// 日志
+**/logs/
+**/*.log
+
+// 编辑器与系统
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea
+.vscode
+*.swp
+*.swo
+
+// 临时
+*.tmp
+*~

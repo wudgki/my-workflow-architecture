@@ -1,0 +1,44 @@
+// ============================================================
+// .stignore for samuel-aiws-wiki  (10-Hermes-Wiki/)
+// 安装位置: <Target>/10-Hermes-Wiki/.stignore
+// 文档: ../README.md
+// ============================================================
+
+// 版本控制（让 Git 自己管）
+.git
+.gitignore
+
+// Obsidian 本机状态（结构同步，状态本地）
+.obsidian/workspace
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+.obsidian/.DS_Store
+.obsidian/plugins/*/data.json
+
+// 临时 / 日志
+*.tmp
+*.swp
+*.swo
+*~
+
+// 操作系统垃圾
+.DS_Store
+Thumbs.db
+desktop.ini
+
+// 编辑器
+.idea
+.vscode
+
+// 草稿过大的二进制（图片放 _attachments，>50MB 不建议同步）
+// 如果要例外某个文件，使用 !pattern 解除忽略
+*.zip
+*.tar.gz
+*.7z
+*.iso
+*.dmg
+
+// 不要同步备份目录（万一有人误放）
+**/_backup
+**/_trash

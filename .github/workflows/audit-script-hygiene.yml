@@ -1,0 +1,55 @@
+# GitHub Actions workflow: run Audit-ScriptHygiene.ps1 on every PR
+# and on every push to main.
+#
+# Scope (locked to PR #5):
+#   - Only scans:  *.ps1 *.psm1 *.psd1 *.yaml *.yml *.stignore
+#   - Does NOT scan markdown
+#   - Does NOT run pre-commit hooks
+#   - Does NOT generate HTML reports
+#   - Does NOT introduce markdown lenience / three-tier classification
+#
+# Exit code 0 from the audit script is required for the check to pass.
+# Audit script semantics are unchanged from PR #4.
+
+name: audit-script-hygiene
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit script hygiene
+    # windows-latest is used so PowerShell 5.1 path semantics match the
+    # primary user environment. PowerShell 7 is also pre-installed and
+    # would work, but matching production behavior matters here.
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Show PowerShell version
+        shell: pwsh
+        run: |
+          $PSVersionTable | Format-List
+
+      - name: Run Audit-ScriptHygiene
+        shell: pwsh
+        run: |
+          # Same Include list the README recommends as the release-time
+          # total scan. Markdown intentionally excluded (PR #5 scope).
+          .\90-Ops\scripts\Audit-ScriptHygiene.ps1 `
+              -Path . `
+              -Include '*.ps1','*.psm1','*.psd1','*.yaml','*.yml','*.stignore' `
+              -Format summary
+          # The script's own exit code drives the job result. No extra
+          # logic here on purpose; PR #5 is intentionally minimal.

@@ -9,9 +9,11 @@
     - Copies documentation files (_about.md / README.md / SOPs) from -Source
     - Generates .machine-id (marks machine role)
     - Creates secrets/ subdirectory placeholders
-    - Installs Wiki templates (10-Hermes-Wiki/99-Templates/, copy-if-missing)
+    - Installs Wiki templates (10-Hermes-Wiki/99-Templates/)
+    - Installs Claude Code agents (20-Claude-Code/agents/)
+    - Installs Intelligence pipeline configs (50-Intelligence/pipelines/)
     - Installs Syncthing .stignore files (from 90-Ops/sync/stignore/ templates)
-    - Does NOT overwrite existing files by default; use -Force to overwrite docs and templates
+    - All asset installs use copy-if-missing; use -Force to overwrite
     Safe to run repeatedly; each run only fills in missing items.
 
     Tested on: Windows PowerShell 5.1 and PowerShell 7.x
@@ -344,29 +346,32 @@ function Install-StIgnore {
     }
 }
 
-function Install-Templates {
+function Install-Assets {
     <#
     .SYNOPSIS
-        Install Wiki templates (10-Hermes-Wiki/99-Templates/) to target workspace.
+        Install blueprint assets from a source subdirectory to target workspace.
 
     .DESCRIPTION
-        - Recursively scans source template directory (including _about.md and all TPL-*.md)
-        - Default: copy-if-missing. If target file exists, outputs SKIP and leaves it untouched
+        Generic copy-if-missing installer for any blueprint directory.
+        - Recursively scans the source subdirectory
+        - Default: copy-if-missing. If target file exists, outputs SKIP
         - Only overwrites when -Force is explicitly set
-        - DryRun mode: lists every template file that would be copied or skipped
-        - Path is locked to 10-Hermes-Wiki/99-Templates/
+        - DryRun mode: lists every file that would be copied or skipped
+        - Excludes .gitkeep files
     #>
     param(
         [string]$SrcRoot,
-        [string]$DstRoot
+        [string]$DstRoot,
+        [string]$RelativeRoot,
+        [string]$Label
     )
 
-    $relativeRoot = '10-Hermes-Wiki/99-Templates'
+    $relativeRoot = $RelativeRoot
     $srcDir = Join-Path $SrcRoot $relativeRoot
     $dstDir = Join-Path $DstRoot $relativeRoot
 
     if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) {
-        Write-Step "Wiki template source dir missing, skip: $srcDir" 'WARN'
+        Write-Step "$Label source dir missing, skip: $srcDir" 'WARN'
         return
     }
 
@@ -385,7 +390,7 @@ function Install-Templates {
                 | Where-Object { $_.Name -ne '.gitkeep' }
 
     if (-not $files -or $files.Count -eq 0) {
-        Write-Step 'Template dir is empty, nothing to install' 'WARN'
+        Write-Step "$Label dir is empty, nothing to install" 'WARN'
         return
     }
 
@@ -409,18 +414,18 @@ function Install-Templates {
 
         if (Test-Path -LiteralPath $dst) {
             if ($Force) {
-                Write-Step "Overwrite template: $displayPath" 'WARN'
+                Write-Step "Overwrite: $displayPath" 'WARN'
                 if (-not $DryRun) {
                     Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
                 }
                 $countOverwrite++
             } else {
                 # copy-if-missing: skip existing
-                Write-Step "Template exists (use -Force to overwrite): $displayPath" 'SKIP'
+                Write-Step "Exists (use -Force to overwrite): $displayPath" 'SKIP'
                 $countSkip++
             }
         } else {
-            Write-Step "Copy template: $displayPath" 'OK'
+            Write-Step "Copy: $displayPath" 'OK'
             if (-not $DryRun) {
                 Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
             }
@@ -429,7 +434,7 @@ function Install-Templates {
     }
 
     # Summary
-    Write-Step "Templates summary: copied=$countCopy / overwritten=$countOverwrite / skipped=$countSkip (total=$($files.Count))" 'INFO'
+    Write-Step "$Label summary: copied=$countCopy / overwritten=$countOverwrite / skipped=$countSkip (total=$($files.Count))" 'INFO'
 }
 
 # ============================================================
@@ -481,7 +486,7 @@ Ensure-Dir -Path $Target
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 1/5: Creating directory skeleton' 'INFO'
+Write-Step 'Phase 1/7: Creating directory skeleton' 'INFO'
 foreach ($d in $Directories) {
     Ensure-Dir -Path (Join-Path $Target $d)
 }
@@ -491,7 +496,7 @@ foreach ($d in $Directories) {
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 2/5: Copying documents (_about / SOP / README)' 'INFO'
+Write-Step 'Phase 2/7: Copying documents (_about / SOP / README)' 'INFO'
 foreach ($f in $DocFiles) {
     Copy-Doc -SrcRoot $Source -DstRoot $Target -Relative $f
 }
@@ -501,7 +506,7 @@ foreach ($f in $DocFiles) {
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 3/5: Generating machine identity and config' 'INFO'
+Write-Step 'Phase 3/7: Generating machine identity and config' 'INFO'
 
 if ($Role) {
     $machineIdPath = Join-Path $Target '.machine-id'
@@ -542,15 +547,34 @@ foreach ($scope in @('shared', 'phase2', 'phase3', 'phase4', 'hermes', 'intel'))
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 4/5: Installing Wiki templates (99-Templates/)' 'INFO'
-Install-Templates -SrcRoot $Source -DstRoot $Target
+Write-Step 'Phase 4/7: Installing Wiki templates (99-Templates/)' 'INFO'
+Install-Assets -SrcRoot $Source -DstRoot $Target `
+               -RelativeRoot '10-Hermes-Wiki/99-Templates' -Label 'Wiki templates'
+
+# ============================================================
+# 9) Install Claude Code agents (20-Claude-Code/agents/)
+# ============================================================
+
+Write-Host ''
+Write-Step 'Phase 5/7: Installing Claude Code agents' 'INFO'
+Install-Assets -SrcRoot $Source -DstRoot $Target `
+               -RelativeRoot '20-Claude-Code/agents' -Label 'Claude Code agents'
+
+# ============================================================
+# 10) Install Intelligence pipelines (50-Intelligence/pipelines/)
+# ============================================================
+
+Write-Host ''
+Write-Step 'Phase 6/7: Installing Intelligence pipelines config' 'INFO'
+Install-Assets -SrcRoot $Source -DstRoot $Target `
+               -RelativeRoot '50-Intelligence/pipelines' -Label 'Intel pipelines'
 
 # ============================================================
 # 9) Install Syncthing .stignore
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 5/5: Installing Syncthing .stignore (if templates available)' 'INFO'
+Write-Step 'Phase 7/7: Installing Syncthing .stignore (if templates available)' 'INFO'
 Install-StIgnore -SrcRoot $Source -DstRoot $Target -Shares $SyncShares
 
 # ============================================================

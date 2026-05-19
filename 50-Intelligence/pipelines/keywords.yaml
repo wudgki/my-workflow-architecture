@@ -3,19 +3,19 @@
 # Used by:
 #   - intel-summarizer agent (auto-tag captures with phase during triage)
 #   - Inbox-Processing-Rules.md section 5 (phase routing rules)
-#   - 50-Intelligence/community-bridges/* (pre-tag at capture time)
+#   - 50-Intelligence community-bridges (pre-tag at capture time)
 #
 # Rules:
 #   1. Each capture is matched against ALL keyword lists top-to-bottom.
 #   2. First match wins (a capture gets exactly ONE phase unless override).
 #   3. If multiple phases match, use the FIRST phase in numeric order.
-#   4. If nothing matches, phase = null -> goes to 00-Inbox/To-Process/.
+#   4. If nothing matches, phase = null -> goes to 00-Inbox To-Process.
 #   5. Keywords are case-insensitive. Regex not supported (plain substring).
 #   6. Chinese keywords are supported (bridges output may be Chinese).
 #   7. This file MUST stay ASCII-safe for audit (Chinese keywords in quotes).
 #
 # Maintenance:
-#   - Add new keywords as you discover new sources / topics.
+#   - Add new keywords as you discover new sources or topics.
 #   - Review quarterly: remove dead projects, add new ones.
 #   - If a keyword causes false positives, move it to the exclude list.
 #
@@ -27,7 +27,7 @@
 
 phase_1:
   # Infrastructure, monitoring, AI tooling, agent frameworks
-  label: "Infra & Intel"
+  label: "Infra and Intel"
   include:
     - "infra"
     - "infrastructure"
@@ -58,7 +58,7 @@ phase_1:
     - "scraper"
     - "GitHub Actions"
     - "github-actions"
-    - "CI/CD"
+    - "CICD"
     - "DevOps"
     - "docker"
     - "Docker"
@@ -136,14 +136,14 @@ phase_2:
     - "PayPal"
     - "letter of credit"
     - "LC"
-    - "T/T"
+    - "TT payment"
   exclude:
     - "crypto payment"
     - "stablecoin payment"
 
 phase_3:
   # Crypto quant (perp + meme + on-chain), A-stock, US-stock
-  label: "Crypto Quant & Trading"
+  label: "Crypto Quant and Trading"
   include:
     # -- Crypto general --
     - "Bitcoin"
@@ -174,7 +174,7 @@ phase_3:
     - "Hyperliquid"
     - "dYdX"
     - "GMX"
-    # -- Perp / Futures --
+    # -- Perp and Futures --
     - "perpetual"
     - "perp"
     - "futures"
@@ -184,8 +184,8 @@ phase_3:
     - "margin"
     - "open interest"
     - "OI"
-    - "long/short ratio"
-    # -- Meme / On-chain --
+    - "long short ratio"
+    # -- Meme and On-chain --
     - "meme"
     - "memecoin"
     - "pump.fun"
@@ -203,13 +203,13 @@ phase_3:
     - "airdrop"
     - "mint"
     - "NFT"
-    # -- KOL / Signals --
+    # -- KOL and Signals --
     - "KOL"
     - "kol"
     - "signal"
     - "call"
     - "alpha"
-    # -- Quant / Strategy --
+    # -- Quant and Strategy --
     - "quant"
     - "quantitative"
     - "backtest"
@@ -236,14 +236,14 @@ phase_3:
     - "Sharpe"
     - "max drawdown"
     - "VaR"
-    # -- A-stock / US-stock --
+    # -- A-stock and US-stock --
     - "A-stock"
     - "A stock"
     - "US stock"
     - "US-stock"
     - "NASDAQ"
     - "NYSE"
-    - "S&P 500"
+    - "SP500"
     - "Russell"
     - "earnings"
     - "Fed"
@@ -309,7 +309,7 @@ phase_4:
     - "conditional token"
     - "CFTC"
     - "prediction exchange"
-    - "yes/no market"
+    - "probability market"
     - "probability market"
     - "Metaculus"
     - "Manifold"
@@ -318,7 +318,7 @@ phase_4:
   exclude: []
 
 # ==========================================================================
-# Global exclude: keywords that prevent ANY auto-routing (force To-Process/)
+# Global exclude: keywords that prevent ANY auto-routing (force To-Process)
 # Use for ambiguous terms that cause too many false positives.
 # ==========================================================================
 global_exclude:
@@ -342,6 +342,6 @@ _meta:
     Keep keywords lowercase-friendly (matching is case-insensitive).
     Chinese keywords are allowed but must be quoted to keep YAML valid.
     The file itself must pass the audit script (ASCII content + quoted
-    non-ASCII would still flag; for now all keywords are ASCII/English.
+    non-ASCII would still flag; for now all keywords are ASCII and English.
     Chinese keyword support will be added when bridges output Chinese
     consistently and we can test the matching behavior).

@@ -1,32 +1,21 @@
 # Phase Routing Keywords Dictionary
-# ==========================================================================
-# Used by:
-#   - intel-summarizer agent (auto-tag captures with phase during triage)
-#   - Inbox-Processing-Rules.md section 5 (phase routing rules)
-#   - 50-Intelligence community-bridges (pre-tag at capture time)
+# ====================================================================
+# Consumed by: intel-summarizer agent, Inbox-Processing-Rules section 5,
+#              community-bridges (pre-tag at capture time)
 #
-# Rules:
-#   1. Each capture is matched against ALL keyword lists top-to-bottom.
-#   2. First match wins (a capture gets exactly ONE phase unless override).
-#   3. If multiple phases match, use the FIRST phase in numeric order.
-#   4. If nothing matches, phase = null -> goes to 00-Inbox To-Process.
-#   5. Keywords are case-insensitive. Regex not supported (plain substring).
-#   6. Chinese keywords are supported (bridges output may be Chinese).
-#   7. This file MUST stay ASCII-safe for audit (Chinese keywords in quotes).
+# Routing rules:
+#   1. Match captures against ALL phases top-to-bottom.
+#   2. First match wins (one phase per capture).
+#   3. Ties resolved by lowest phase number.
+#   4. No match -> phase=null -> 00-Inbox To-Process.
+#   5. Case-insensitive substring match. No regex.
+#   6. This file MUST stay pure ASCII for CI audit.
+#   7. See README.md for Chinese documentation.
 #
-# Maintenance:
-#   - Add new keywords as you discover new sources or topics.
-#   - Review quarterly: remove dead projects, add new ones.
-#   - If a keyword causes false positives, move it to the exclude list.
-#
-# Format:
-#   phase_<N>:
-#     include: [list of keywords that route to this phase]
-#     exclude: [list of keywords that override include, forcing re-triage]
-# ==========================================================================
+# Maintenance: review quarterly. See _meta.next_review.
+# ====================================================================
 
 phase_1:
-  # Infrastructure, monitoring, AI tooling, agent frameworks
   label: "Infra and Intel"
   include:
     - "infra"
@@ -70,13 +59,10 @@ phase_1:
     - "embedding"
     - "prompt engineering"
   exclude:
-    # Avoid routing generic "agent" mentions to Phase 1 when they're
-    # clearly about trading agents (those belong in Phase 3).
     - "trading agent"
     - "quant agent"
 
 phase_2:
-  # B2B packaging platform, Jinguan brand, cross-border e-commerce
   label: "B2B Packaging Platform"
   include:
     - "B2B"
@@ -142,10 +128,8 @@ phase_2:
     - "stablecoin payment"
 
 phase_3:
-  # Crypto quant (perp + meme + on-chain), A-stock, US-stock
   label: "Crypto Quant and Trading"
   include:
-    # -- Crypto general --
     - "Bitcoin"
     - "BTC"
     - "Ethereum"
@@ -163,7 +147,6 @@ phase_3:
     - "stablecoin"
     - "USDT"
     - "USDC"
-    # -- Exchanges --
     - "Binance"
     - "binance"
     - "Bybit"
@@ -174,7 +157,6 @@ phase_3:
     - "Hyperliquid"
     - "dYdX"
     - "GMX"
-    # -- Perp and Futures --
     - "perpetual"
     - "perp"
     - "futures"
@@ -185,7 +167,6 @@ phase_3:
     - "open interest"
     - "OI"
     - "long short ratio"
-    # -- Meme and On-chain --
     - "meme"
     - "memecoin"
     - "pump.fun"
@@ -203,13 +184,11 @@ phase_3:
     - "airdrop"
     - "mint"
     - "NFT"
-    # -- KOL and Signals --
     - "KOL"
     - "kol"
     - "signal"
     - "call"
     - "alpha"
-    # -- Quant and Strategy --
     - "quant"
     - "quantitative"
     - "backtest"
@@ -227,7 +206,6 @@ phase_3:
     - "arbitrage"
     - "stat arb"
     - "factor model"
-    # -- Risk --
     - "risk management"
     - "stop loss"
     - "take profit"
@@ -236,7 +214,6 @@ phase_3:
     - "Sharpe"
     - "max drawdown"
     - "VaR"
-    # -- A-stock and US-stock --
     - "A-stock"
     - "A stock"
     - "US stock"
@@ -262,7 +239,6 @@ phase_3:
     - "implied volatility"
     - "SEC"
     - "IPO"
-    # -- Macro --
     - "macro"
     - "interest rate"
     - "inflation"
@@ -286,7 +262,6 @@ phase_3:
     - "event contract"
 
 phase_4:
-  # Prediction markets (Polymarket, Kalshi, event contracts)
   label: "Prediction Market"
   include:
     - "Polymarket"
@@ -310,17 +285,15 @@ phase_4:
     - "CFTC"
     - "prediction exchange"
     - "probability market"
-    - "probability market"
     - "Metaculus"
     - "Manifold"
     - "Augur"
     - "Gnosis"
   exclude: []
 
-# ==========================================================================
-# Global exclude: keywords that prevent ANY auto-routing (force To-Process)
-# Use for ambiguous terms that cause too many false positives.
-# ==========================================================================
+# ====================================================================
+# Global exclude: force To-Process regardless of phase match
+# ====================================================================
 global_exclude:
   - "test"
   - "testing only"
@@ -328,20 +301,12 @@ global_exclude:
   - "spam"
   - "unsubscribe"
 
-# ==========================================================================
+# ====================================================================
 # Metadata
-# ==========================================================================
+# ====================================================================
 _meta:
   version: "1.0.0"
   created: "2026-05-19"
   last_reviewed: "2026-05-19"
-  next_review: "2026-08-19"    # quarterly review
+  next_review: "2026-08-19"
   maintainer: "Samuel Wu"
-  notes: |
-    This file is consumed by intel-summarizer agent and community bridges.
-    Keep keywords lowercase-friendly (matching is case-insensitive).
-    Chinese keywords are allowed but must be quoted to keep YAML valid.
-    The file itself must pass the audit script (ASCII content + quoted
-    non-ASCII would still flag; for now all keywords are ASCII and English.
-    Chinese keyword support will be added when bridges output Chinese
-    consistently and we can test the matching behavior).

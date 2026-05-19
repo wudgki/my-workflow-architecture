@@ -385,11 +385,13 @@ function Install-Assets {
         }
     }
 
-    # List all template files recursively (exclude .gitkeep)
-    $files = Get-ChildItem -LiteralPath $srcDir -Recurse -File `
-                | Where-Object { $_.Name -ne '.gitkeep' }
+    # List all files recursively (exclude .gitkeep).
+    # Wrap with @(...) so .Count is always available under StrictMode Latest
+    # (pipeline returning 0 or 1 result would otherwise be $null or scalar).
+    $files = @(Get-ChildItem -LiteralPath $srcDir -Recurse -File `
+                | Where-Object { $_.Name -ne '.gitkeep' })
 
-    if (-not $files -or $files.Count -eq 0) {
+    if ($files.Count -eq 0) {
         Write-Step "$Label dir is empty, nothing to install" 'WARN'
         return
     }
@@ -486,7 +488,7 @@ Ensure-Dir -Path $Target
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 1/7: Creating directory skeleton' 'INFO'
+Write-Step 'Phase 1/8: Creating directory skeleton' 'INFO'
 foreach ($d in $Directories) {
     Ensure-Dir -Path (Join-Path $Target $d)
 }
@@ -496,7 +498,7 @@ foreach ($d in $Directories) {
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 2/7: Copying documents (_about / SOP / README)' 'INFO'
+Write-Step 'Phase 2/8: Copying documents (_about / SOP / README)' 'INFO'
 foreach ($f in $DocFiles) {
     Copy-Doc -SrcRoot $Source -DstRoot $Target -Relative $f
 }
@@ -506,7 +508,7 @@ foreach ($f in $DocFiles) {
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 3/7: Generating machine identity and config' 'INFO'
+Write-Step 'Phase 3/8: Generating machine identity and config' 'INFO'
 
 if ($Role) {
     $machineIdPath = Join-Path $Target '.machine-id'
@@ -547,7 +549,7 @@ foreach ($scope in @('shared', 'phase2', 'phase3', 'phase4', 'hermes', 'intel'))
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 4/7: Installing Wiki templates (99-Templates/)' 'INFO'
+Write-Step 'Phase 4/8: Installing Wiki templates (99-Templates/)' 'INFO'
 Install-Assets -SrcRoot $Source -DstRoot $Target `
                -RelativeRoot '10-Hermes-Wiki/99-Templates' -Label 'Wiki templates'
 
@@ -556,7 +558,7 @@ Install-Assets -SrcRoot $Source -DstRoot $Target `
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 5/7: Installing Claude Code agents' 'INFO'
+Write-Step 'Phase 5/8: Installing Claude Code agents' 'INFO'
 Install-Assets -SrcRoot $Source -DstRoot $Target `
                -RelativeRoot '20-Claude-Code/agents' -Label 'Claude Code agents'
 
@@ -565,7 +567,7 @@ Install-Assets -SrcRoot $Source -DstRoot $Target `
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 6/7: Installing Intelligence pipelines config' 'INFO'
+Write-Step 'Phase 6/8: Installing Intelligence pipelines config' 'INFO'
 Install-Assets -SrcRoot $Source -DstRoot $Target `
                -RelativeRoot '50-Intelligence/pipelines' -Label 'Intel pipelines'
 
@@ -574,7 +576,16 @@ Install-Assets -SrcRoot $Source -DstRoot $Target `
 # ============================================================
 
 Write-Host ''
-Write-Step 'Phase 7/7: Installing Syncthing .stignore (if templates available)' 'INFO'
+Write-Step 'Phase 7/8: Installing Ops runbook' 'INFO'
+Install-Assets -SrcRoot $Source -DstRoot $Target `
+               -RelativeRoot '90-Ops/runbook' -Label 'Ops runbook'
+
+# ============================================================
+# 12) Install Syncthing .stignore
+# ============================================================
+
+Write-Host ''
+Write-Step 'Phase 8/8: Installing Syncthing .stignore (if templates available)' 'INFO'
 Install-StIgnore -SrcRoot $Source -DstRoot $Target -Shares $SyncShares
 
 # ============================================================

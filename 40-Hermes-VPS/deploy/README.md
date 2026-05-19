@@ -2,6 +2,11 @@
 
 本目录存放 Hermes 服务在 VPS 上的部署蓝图。**模板先行，代码后到** —— 在 `50-Intelligence/community-bridges/` 的代码写好之前，本目录提供完整的服务编排，让 VPS 一旦准备好就能 `docker compose up`。
 
+> **当前状态**：镜像 tag 均为 `v0.0.0-placeholder`（不存在）。
+> **你现在能做的**：只启动 `cloudflared` 验证 tunnel 通路。
+> **不能做的**：`docker compose up`（全量启动会报镜像拉取失败）。
+> 等后续 PR 发布 bridge/intel/watchdog 镜像后，改 `.env` 里的 tag 再全量启动。
+
 ---
 
 ## 文件清单
@@ -52,7 +57,8 @@
 - 公网入口只走 Cloudflare Tunnel —— **VPS 防火墙保持只开 22**
 - 服务之间走 docker 内网，外部不可达
 - `blueprint-ro` 把蓝图仓库以**只读**方式挂进容器，让 intel-pipelines 能读 `keywords.yaml` 但**绝对不能改**
-- watchdog 用 read-only docker.sock，能查询容器状态但不能管理容器
+- watchdog 当前模板挂载了 docker.sock:ro（只读），这是**高风险占位设计**，
+  真正上线前必须评估替代方案（见下方"docker.sock 安全说明"）
 
 ---
 
@@ -180,10 +186,37 @@ VPS **不参与 Syncthing**。这点在 `90-Ops/sync/syncthing-folders.yaml` 的
 
 - ❌ **不要**把 `.env` 提交到 git（`.gitignore` 已经覆盖）
 - ❌ **不要**在 compose 里硬编码任何 token / API key —— 全部通过 `${VAR}` 引用 .env
-- ❌ **不要**给 docker.sock 挂 read-write —— watchdog 只用 `:ro`
+- ⚠️ **docker.sock 是高权限边界**（见下方安全说明）—— 当前模板挂 `:ro` 是占位，上线前必须重新评估
 - ❌ **不要**直接在 VPS 上 `vim` 编辑业务策略 —— 业务策略归 `30-Phases/`，VPS 只负责执行
 - ✅ Cloudflare Tunnel 是唯一公网入口，关掉 tunnel 就能瞬间断网隔离
 - ✅ 所有镜像 tag **必须固定版本**，禁用 `:latest`
+
+---
+
+## docker.sock 安全说明
+
+当前 `docker-compose.example.yml` 里 watchdog 挂载了 `/var/run/docker.sock:/var/run/docker.sock:ro`。这是一个**高权限占位设计**，必须在真正上线前解决：
+
+### 风险
+
+- Docker socket 即使挂为 `:ro`，容器内进程仍可通过 Docker API **读取所有容器的环境变量（含 secrets）、挂载路径、网络配置**
+- 如果 watchdog 容器被攻破（依赖漏洞 / RCE），攻击者可以枚举整个 docker host
+- `:ro` 只阻止了文件系统层面的写，不阻止 API 层面的读操作
+
+### 上线前必须选择的替代方案
+
+| 方案 | 安全级别 | 复杂度 | 说明 |
+|---|---|---|---|
+| **A. Docker Socket Proxy**（推荐） | 高 | 中 | 部署 [tecnativa/docker-socket-proxy](https://github.com/Tecnativa/docker-socket-proxy)，只暴露 `/containers/json` 和 `/containers/{id}/json`，禁用所有写操作 |
+| B. Host-side watchdog | 高 | 低 | 不在容器里跑 watchdog，而是在 host 上用 systemd timer 跑一个 shell 脚本，调用 `docker ps --format` |
+| C. Prometheus + cAdvisor | 高 | 高 | 用标准监控栈，watchdog 只读 Prometheus metrics，不接触 socket |
+| D. 保持 :ro（最小可行方案） | 低 | 低 | 仅当 watchdog 镜像是自己构建、无第三方依赖、无网络入口时可接受 |
+
+### 当前状态
+
+- **这只是模板占位**，watchdog 镜像 `v0.0.0-placeholder` 不存在
+- 真正实现 watchdog 代码时（未来 PR），必须在 PR 描述里声明选择了哪个方案
+- **不要让任何不可信容器（第三方镜像、未审计镜像）接触 docker.sock**
 
 ---
 

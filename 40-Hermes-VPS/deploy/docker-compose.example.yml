@@ -1,0 +1,191 @@
+# Hermes VPS - docker compose example template
+# ============================================================
+# THIS IS A TEMPLATE. To use it:
+#   1. Copy to docker-compose.yml on the VPS:
+#        cp docker-compose.example.yml docker-compose.yml
+#   2. Copy ../env/.env.example to ../env/.env and fill in real values
+#   3. Review every image tag and pin to a specific version
+#   4. Run: docker compose --env-file ../env/.env up -d
+#
+# Filename intentionally uses .example.yml so that running
+# 'docker compose up' in this directory will NOT pick it up by mistake.
+# ============================================================
+#
+# Service architecture:
+#
+#   bridge-ingress     Webhook receiver for Discord, Telegram, Feishu.
+#                      Writes captures to /data/inbox (synced to primary
+#                      via SSH rsync, NOT Syncthing).
+#
+#   intel-pipelines    Periodic worker. Reads keywords.yaml from a
+#                      mounted blueprint repo, processes captures from
+#                      /data/inbox, writes summaries to /data/digest.
+#
+#   watchdog           Health checks all services every 60s. Sends
+#                      Telegram or Feishu alert when any service is
+#                      unhealthy or the disk fills up.
+#
+#   cloudflared        Cloudflare Tunnel client. Exposes
+#                      bridge-ingress publicly without opening any port
+#                      on the VPS firewall. Requires CF tunnel token.
+#
+# Networking:
+#   - Internal network 'hermes-net' for service-to-service calls.
+#   - Only cloudflared touches the public internet.
+#   - bridge-ingress listens on internal :8080, NOT exposed to host.
+#
+# Volumes:
+#   - hermes-data       persistent, holds inbox, digest, sqlite
+#   - hermes-logs       persistent, log files for grep/tail
+#   - blueprint-ro      read-only mount of the blueprint repo so
+#                       intel-pipelines can read keywords.yaml
+#
+# ============================================================
+
+# Compose Specification: https://github.com/compose-spec/compose-spec
+# Version field is omitted - modern docker compose ignores it anyway.
+
+services:
+
+  # --------------------------------------------------------------
+  # bridge-ingress: receives webhooks, writes captures to /data/inbox
+  # --------------------------------------------------------------
+  bridge-ingress:
+    # Replace with the actual bridge image once 50-Intelligence/community-bridges
+    # is implemented and published. For now, a placeholder.
+    image: ghcr.io/${BRIDGE_IMAGE_REPO:-wudgki/hermes-bridge}:${BRIDGE_IMAGE_TAG:-v0.0.0-placeholder}
+    container_name: hermes-bridge-ingress
+    restart: on-failure:5
+    networks:
+      - hermes-net
+    environment:
+      LOG_LEVEL: info
+      INBOX_PATH: /data/inbox
+      KEYWORDS_PATH: /blueprint/50-Intelligence/pipelines/keywords.yaml
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?DISCORD_TOKEN missing}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN missing}
+      FEISHU_WEBHOOK_SECRET: ${FEISHU_WEBHOOK_SECRET:?FEISHU_WEBHOOK_SECRET missing}
+    volumes:
+      - hermes-data:/data
+      - hermes-logs:/logs
+      - blueprint-ro:/blueprint:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # --------------------------------------------------------------
+  # intel-pipelines: periodic worker, reads captures, writes digests
+  # --------------------------------------------------------------
+  intel-pipelines:
+    image: ghcr.io/${INTEL_IMAGE_REPO:-wudgki/hermes-intel}:${INTEL_IMAGE_TAG:-v0.0.0-placeholder}
+    container_name: hermes-intel-pipelines
+    restart: on-failure:5
+    networks:
+      - hermes-net
+    environment:
+      LOG_LEVEL: info
+      INBOX_PATH: /data/inbox
+      DIGEST_PATH: /data/digest
+      KEYWORDS_PATH: /blueprint/50-Intelligence/pipelines/keywords.yaml
+      RUN_INTERVAL_SEC: ${INTEL_RUN_INTERVAL_SEC:-3600}
+      DAILY_DIGEST_HOUR_UTC: ${INTEL_DAILY_HOUR_UTC:-23}
+    volumes:
+      - hermes-data:/data
+      - hermes-logs:/logs
+      - blueprint-ro:/blueprint:ro
+    depends_on:
+      bridge-ingress:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "test", "-f", "/data/intel-heartbeat"]
+      interval: 60s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: "1.0"
+
+  # --------------------------------------------------------------
+  # watchdog: monitors all services, alerts on failure
+  # --------------------------------------------------------------
+  watchdog:
+    image: ghcr.io/${WATCHDOG_IMAGE_REPO:-wudgki/hermes-watchdog}:${WATCHDOG_IMAGE_TAG:-v0.0.0-placeholder}
+    container_name: hermes-watchdog
+    restart: always
+    networks:
+      - hermes-net
+    environment:
+      LOG_LEVEL: info
+      CHECK_INTERVAL_SEC: ${WATCHDOG_INTERVAL_SEC:-60}
+      ALERT_TELEGRAM_TOKEN: ${ALERT_TELEGRAM_TOKEN:?ALERT_TELEGRAM_TOKEN missing}
+      ALERT_TELEGRAM_CHAT_ID: ${ALERT_TELEGRAM_CHAT_ID:?ALERT_TELEGRAM_CHAT_ID missing}
+      ALERT_FEISHU_WEBHOOK: ${ALERT_FEISHU_WEBHOOK:-}
+      DISK_FREE_THRESHOLD_GB: ${DISK_FREE_THRESHOLD_GB:-5}
+      WATCH_TARGETS: bridge-ingress,intel-pipelines,cloudflared
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - hermes-logs:/logs:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.1"
+
+  # --------------------------------------------------------------
+  # cloudflared: Cloudflare Tunnel client (no public ports needed)
+  # --------------------------------------------------------------
+  # Pin to a specific cloudflared version. Check
+  # https://github.com/cloudflare/cloudflared/releases for the
+  # latest stable tag and update.
+  cloudflared:
+    image: cloudflare/cloudflared:2024.10.1
+    container_name: hermes-cloudflared
+    restart: unless-stopped
+    networks:
+      - hermes-net
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN missing}
+    depends_on:
+      bridge-ingress:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.2"
+
+# ============================================================
+# Networks
+# ============================================================
+networks:
+  hermes-net:
+    name: hermes-net
+    driver: bridge
+
+# ============================================================
+# Volumes
+# ============================================================
+volumes:
+  hermes-data:
+    name: hermes-data
+    driver: local
+  hermes-logs:
+    name: hermes-logs
+    driver: local
+  blueprint-ro:
+    name: blueprint-ro
+    driver: local
+    driver_opts:
+      type: none
+      device: ${BLUEPRINT_REPO_PATH:-/opt/hermes/blueprint}
+      o: bind

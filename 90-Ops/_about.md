@@ -9,6 +9,8 @@
 | `sync/` | rclone / Syncthing / Git 的同步配置 |
 | `secrets/` | 密钥（**全部 .gitignore**），仅放 `README.md` 说明 |
 | `backup/` | 备份策略 / 脚本 / 校验 |
+| `scripts/` | 初始化脚本（`Init-AIWorkspace.ps1`）+ 卫生审计（`Audit-ScriptHygiene.ps1`） |
+| `runbook/` | 运维 SOP：[`smoke-tests.md`](./runbook/smoke-tests.md) 基线验证 |
 | `multi-machine-protocol.md` | 主机 / 副机 / VPS 的协作约定 |
 
 ## 三机角色

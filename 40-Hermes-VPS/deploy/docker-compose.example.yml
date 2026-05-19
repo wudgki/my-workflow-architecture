@@ -162,9 +162,10 @@ services:
     networks:
       - hermes-net
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN missing}
-    depends_on:
-      bridge-ingress:
-        condition: service_started
+    # No depends_on: cloudflared must be startable standalone so you can
+    # verify the tunnel before bridge/intel/watchdog images exist.
+    # Once all services are live, traffic routing is handled inside the
+    # Cloudflare dashboard (tunnel -> public hostname -> localhost:8080).
     deploy:
       resources:
         limits:

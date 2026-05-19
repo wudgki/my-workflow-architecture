@@ -2,10 +2,11 @@
 
 本目录存放 Hermes 服务在 VPS 上的部署蓝图。**模板先行，代码后到** —— 在 `50-Intelligence/community-bridges/` 的代码写好之前，本目录提供完整的服务编排，让 VPS 一旦准备好就能 `docker compose up`。
 
-> **当前状态**：镜像 tag 均为 `v0.0.0-placeholder`（不存在）。
-> **你现在能做的**：只启动 `cloudflared` 验证 tunnel 通路。
-> **不能做的**：`docker compose up`（全量启动会报镜像拉取失败）。
-> 等后续 PR 发布 bridge/intel/watchdog 镜像后，改 `.env` 里的 tag 再全量启动。
+> **当前状态**：`bridge-ingress` / `intel-pipelines` / `watchdog` 镜像 tag 均为 `v0.0.0-placeholder`（不存在）。
+> **你现在能做的**：**只启动 `cloudflared`** 验证 Cloudflare Tunnel 网络通路。
+> **不能做的**：`docker compose up -d`（全量启动会尝试拉取 placeholder 镜像并失败）。
+> **不要启动**：`bridge-ingress` / `intel-pipelines` / `watchdog`，它们是 placeholder，启动会报错。
+> 等后续 PR 发布真实镜像后，改 `.env` 里的 tag 再全量启动。
 
 ---
 

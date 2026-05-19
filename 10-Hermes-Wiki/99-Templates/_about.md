@@ -11,7 +11,7 @@
 | `TPL-周报.md` | 周度回顾与计划 | `10-Hermes-Wiki/70-Personal-OS/Weekly/` | phase-coordinator / 人工 |
 | `TPL-Phase周期规划.md` | Phase 级周期 OKR + 里程碑 + 任务分解 | `10-Hermes-Wiki/<Phase>/Cycle-Plans/` | phase-coordinator / 人工 |
 | `TPL-情报日报.md` | 情报日报 / 周报（按 Phase 拆分） | `<Phase>/Daily-Digest/` 或 `Weekly-Digest/` | intel-summarizer agent / 人工 |
-| `TPL-交易复盘.md` | 单笔/单日交易复盘（必须人工写） | `30-Phase3-.../Trade-Reviews/` 或 `40-.../Trade-Reviews/` | **人工**（agent 不替代决策） |
+| `TPL-交易复盘.md` | 单笔/单日交易复盘（Agent 辅助 + 人工审批） | `30-Phase3-.../Trade-Reviews/` 或 `40-.../Trade-Reviews/` | Agent 写草稿 + **人工审批闭环** |
 
 ## 命名约定
 

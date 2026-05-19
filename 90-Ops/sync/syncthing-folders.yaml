@@ -1,0 +1,95 @@
+# Syncthing 共享配置（权威声明）
+# ----------------------------------------------------------------------
+# 这是文档化的配置 —— Syncthing 本身不读这个文件，所有共享需在 GUI 手工建立。
+# 但任何参与机器都按本文件来核对：folder id / 路径 / type / 忽略规则 / 版本策略
+# 必须一致。变更先改本文件并提交 Git，再调整 GUI。
+# ----------------------------------------------------------------------
+
+devices:
+  primary:
+    name: samuel-primary
+    id: "TODO-PASTE-PRIMARY-DEVICE-ID"   # 在 Syncthing GUI Settings 里复制
+    notes: 主创作机
+  secondary:
+    name: samuel-secondary
+    id: "TODO-PASTE-SECONDARY-DEVICE-ID"
+    notes: 备份 + 长跑任务 + 灾备接管
+  # VPS 不参与 Syncthing。Hermes 通过 Git pull + SSH rsync 单向消费。
+
+# 各共享的统一版本策略（File Versioning · Simple）
+defaults:
+  versioning:
+    type: simple
+    keep: 7              # 保留 7 个历史版本
+  fs_watcher_enabled: true
+  rescan_interval_s: 3600
+
+folders:
+
+  - id: samuel-aiws-wiki
+    label: AI-Workspace · Hermes Wiki
+    path_relative: 10-Hermes-Wiki
+    devices: [primary, secondary]
+    type:
+      primary: sendreceive
+      secondary: receiveonly      # 接管模式临时改 sendreceive
+    ignore_perms: true
+    notes: |
+      Obsidian Vault。.obsidian/workspace* 不同步（见 stignore/wiki.stignore）。
+      副电脑默认 Receive Only，仅当主机不可用执行接管时才允许写入。
+
+  - id: samuel-aiws-claude-code
+    label: AI-Workspace · Claude Code Assets
+    path_relative: 20-Claude-Code
+    devices: [primary, secondary]
+    type:
+      primary: sendreceive
+      secondary: sendreceive
+    ignore_perms: true
+    notes: |
+      Agent / Skill / Prompt / MCP 配置。logs/ 与 memory/ 中的本机临时记忆不同步。
+
+  - id: samuel-aiws-phases
+    label: AI-Workspace · Phases Code
+    path_relative: 30-Phases
+    devices: [primary, secondary]
+    type:
+      primary: sendreceive
+      secondary: sendreceive
+    ignore_perms: true
+    notes: |
+      业务代码。node_modules / dist / __pycache__ / .env / runs/ 全部忽略。
+
+  - id: samuel-aiws-inbox
+    label: AI-Workspace · Inbox
+    path_relative: 00-Inbox
+    devices: [primary, secondary]
+    type:
+      primary: sendreceive
+      secondary: sendreceive
+    ignore_perms: true
+    notes: |
+      两台机器都可能产生 capture（手机 → PC、不同设备的桌面应用）。
+      _archive/auto-expired/ 不必互传。
+
+  - id: samuel-aiws-repo-research
+    label: AI-Workspace · Repo Research
+    path_relative: 60-Repo-Research
+    devices: [primary, secondary]
+    type:
+      primary: sendreceive
+      secondary: sendreceive
+    ignore_perms: true
+    notes: |
+      仓库分析报告。reports/ + comparisons/ + adopt-list/ + reject-list/。
+
+# ----------------------------------------------------------------------
+# 显式排除（永不进入任何 Syncthing folder）
+# ----------------------------------------------------------------------
+never_share:
+  - 40-Hermes-VPS         # 通过 Git + SSH rsync
+  - 50-Intelligence       # 同上
+  - 70-Sandbox            # 各机自治实验
+  - 90-Ops/secrets        # 永不经网络明文同步
+  - 90-Ops/backup         # 本机备份产物
+  - .git

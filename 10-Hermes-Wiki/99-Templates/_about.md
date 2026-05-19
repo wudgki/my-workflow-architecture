@@ -7,8 +7,11 @@
 | 模板文件 | 用途 | 产出落地位置 | 使用者 |
 |---|---|---|---|
 | `TPL-仓库分析报告.md` | GitHub 仓库分析（中文） | `60-Repo-Research/reports/` | repo-researcher agent / 人工 |
+| `TPL-仓库对比.md` | 多仓库横向对比（选型决策） | `60-Repo-Research/comparisons/` | repo-researcher agent / 人工 |
 | `TPL-周报.md` | 周度回顾与计划 | `10-Hermes-Wiki/70-Personal-OS/Weekly/` | phase-coordinator / 人工 |
 | `TPL-Phase周期规划.md` | Phase 级周期 OKR + 里程碑 + 任务分解 | `10-Hermes-Wiki/<Phase>/Cycle-Plans/` | phase-coordinator / 人工 |
+| `TPL-情报日报.md` | 情报日报 / 周报（按 Phase 拆分） | `<Phase>/Daily-Digest/` 或 `Weekly-Digest/` | intel-summarizer agent / 人工 |
+| `TPL-交易复盘.md` | 单笔/单日交易复盘（Agent 辅助 + 人工审批） | `30-Phase3-.../Trade-Reviews/` 或 `40-.../Trade-Reviews/` | Agent 写草稿 + **人工审批闭环** |
 
 ## 命名约定
 
@@ -40,7 +43,7 @@
 
 ## 待补（TODO）
 
-- [ ] `TPL-情报日报.md`：intel-summarizer agent 的日/周情报简报模板
-- [ ] `TPL-仓库对比.md`：多仓库横向对比模板（`60-Repo-Research/comparisons/`）
+- [x] `TPL-情报日报.md`：intel-summarizer agent 的日/周情报简报模板（PR #7）
+- [x] `TPL-仓库对比.md`：多仓库横向对比模板（PR #7）
+- [x] `TPL-交易复盘.md`：Phase 3 / 4 交易复盘模板（PR #7）
 - [ ] `TPL-决策记录-ADR.md`：Architecture Decision Record 独立模板
-- [ ] `TPL-交易复盘.md`：Phase 3 / 4 交易复盘模板

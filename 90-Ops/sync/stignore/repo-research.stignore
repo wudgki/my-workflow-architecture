@@ -1,0 +1,29 @@
+// ============================================================
+// .stignore for samuel-aiws-repo-research  (60-Repo-Research/)
+// 安装位置: <Target>/60-Repo-Research/.stignore
+// ============================================================
+
+// Git
+.git
+.gitignore
+
+// 抓取仓库的临时 clone（如果 repo-researcher 把仓库拉到这里做分析）
+**/_clones/
+**/_tmp/
+
+// 大文件
+*.zip
+*.tar.gz
+*.7z
+
+// 编辑器与系统
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea
+.vscode
+*.swp
+*.swo
+
+// 日志
+*.log

@@ -1,0 +1,347 @@
+# Phase Routing Keywords Dictionary
+# ==========================================================================
+# Used by:
+#   - intel-summarizer agent (auto-tag captures with phase during triage)
+#   - Inbox-Processing-Rules.md section 5 (phase routing rules)
+#   - 50-Intelligence/community-bridges/* (pre-tag at capture time)
+#
+# Rules:
+#   1. Each capture is matched against ALL keyword lists top-to-bottom.
+#   2. First match wins (a capture gets exactly ONE phase unless override).
+#   3. If multiple phases match, use the FIRST phase in numeric order.
+#   4. If nothing matches, phase = null -> goes to 00-Inbox/To-Process/.
+#   5. Keywords are case-insensitive. Regex not supported (plain substring).
+#   6. Chinese keywords are supported (bridges output may be Chinese).
+#   7. This file MUST stay ASCII-safe for audit (Chinese keywords in quotes).
+#
+# Maintenance:
+#   - Add new keywords as you discover new sources / topics.
+#   - Review quarterly: remove dead projects, add new ones.
+#   - If a keyword causes false positives, move it to the exclude list.
+#
+# Format:
+#   phase_<N>:
+#     include: [list of keywords that route to this phase]
+#     exclude: [list of keywords that override include, forcing re-triage]
+# ==========================================================================
+
+phase_1:
+  # Infrastructure, monitoring, AI tooling, agent frameworks
+  label: "Infra & Intel"
+  include:
+    - "infra"
+    - "infrastructure"
+    - "monitoring"
+    - "MCP"
+    - "model context protocol"
+    - "Claude Code"
+    - "claude-code"
+    - "Hermes"
+    - "Obsidian"
+    - "obsidian-plugin"
+    - "agent framework"
+    - "agent-framework"
+    - "intel pipeline"
+    - "intel-pipeline"
+    - "VPS"
+    - "Syncthing"
+    - "syncthing"
+    - "n8n"
+    - "automation"
+    - "webhook"
+    - "cron"
+    - "scheduler"
+    - "playwright-mcp"
+    - "mcp-chrome"
+    - "r.jina.ai"
+    - "web scraping"
+    - "scraper"
+    - "GitHub Actions"
+    - "github-actions"
+    - "CI/CD"
+    - "DevOps"
+    - "docker"
+    - "Docker"
+    - "ansible"
+    - "terraform"
+    - "LLM"
+    - "RAG"
+    - "vector database"
+    - "embedding"
+    - "prompt engineering"
+  exclude:
+    # Avoid routing generic "agent" mentions to Phase 1 when they're
+    # clearly about trading agents (those belong in Phase 3).
+    - "trading agent"
+    - "quant agent"
+
+phase_2:
+  # B2B packaging platform, Jinguan brand, cross-border e-commerce
+  label: "B2B Packaging Platform"
+  include:
+    - "B2B"
+    - "b2b"
+    - "packaging"
+    - "printing"
+    - "Jinguan"
+    - "jinguan"
+    - "fenxiangyin"
+    - "cross-border"
+    - "e-commerce"
+    - "ecommerce"
+    - "Shopify"
+    - "shopify"
+    - "WooCommerce"
+    - "CMS"
+    - "SEO"
+    - "seo"
+    - "Google Ads"
+    - "Facebook Ads"
+    - "Meta Ads"
+    - "SEM"
+    - "sem"
+    - "SKU"
+    - "product catalog"
+    - "corrugated"
+    - "flexo"
+    - "offset"
+    - "digital printing"
+    - "label"
+    - "carton"
+    - "box"
+    - "paper"
+    - "substrate"
+    - "coating"
+    - "lamination"
+    - "die-cut"
+    - "spot UV"
+    - "hot stamping"
+    - "alibaba"
+    - "Alibaba"
+    - "Made-in-China"
+    - "Global Sources"
+    - "trade show"
+    - "Canton Fair"
+    - "drupa"
+    - "FESPA"
+    - "independent site"
+    - "dropshipping"
+    - "fulfillment"
+    - "logistics"
+    - "customs"
+    - "tariff"
+    - "HS code"
+    - "payment gateway"
+    - "Stripe"
+    - "PayPal"
+    - "letter of credit"
+    - "LC"
+    - "T/T"
+  exclude:
+    - "crypto payment"
+    - "stablecoin payment"
+
+phase_3:
+  # Crypto quant (perp + meme + on-chain), A-stock, US-stock
+  label: "Crypto Quant & Trading"
+  include:
+    # -- Crypto general --
+    - "Bitcoin"
+    - "BTC"
+    - "Ethereum"
+    - "ETH"
+    - "crypto"
+    - "cryptocurrency"
+    - "altcoin"
+    - "token"
+    - "DeFi"
+    - "defi"
+    - "DEX"
+    - "dex"
+    - "CEX"
+    - "cex"
+    - "stablecoin"
+    - "USDT"
+    - "USDC"
+    # -- Exchanges --
+    - "Binance"
+    - "binance"
+    - "Bybit"
+    - "bybit"
+    - "OKX"
+    - "okx"
+    - "Bitget"
+    - "Hyperliquid"
+    - "dYdX"
+    - "GMX"
+    # -- Perp / Futures --
+    - "perpetual"
+    - "perp"
+    - "futures"
+    - "funding rate"
+    - "liquidation"
+    - "leverage"
+    - "margin"
+    - "open interest"
+    - "OI"
+    - "long/short ratio"
+    # -- Meme / On-chain --
+    - "meme"
+    - "memecoin"
+    - "pump.fun"
+    - "Raydium"
+    - "Jupiter"
+    - "Solana"
+    - "SOL"
+    - "on-chain"
+    - "onchain"
+    - "whale"
+    - "smart money"
+    - "sniper"
+    - "rug pull"
+    - "honeypot"
+    - "airdrop"
+    - "mint"
+    - "NFT"
+    # -- KOL / Signals --
+    - "KOL"
+    - "kol"
+    - "signal"
+    - "call"
+    - "alpha"
+    # -- Quant / Strategy --
+    - "quant"
+    - "quantitative"
+    - "backtest"
+    - "backtesting"
+    - "strategy"
+    - "algo"
+    - "algorithm"
+    - "systematic"
+    - "grid"
+    - "DCA"
+    - "mean reversion"
+    - "momentum"
+    - "trend following"
+    - "market making"
+    - "arbitrage"
+    - "stat arb"
+    - "factor model"
+    # -- Risk --
+    - "risk management"
+    - "stop loss"
+    - "take profit"
+    - "position sizing"
+    - "drawdown"
+    - "Sharpe"
+    - "max drawdown"
+    - "VaR"
+    # -- A-stock / US-stock --
+    - "A-stock"
+    - "A stock"
+    - "US stock"
+    - "US-stock"
+    - "NASDAQ"
+    - "NYSE"
+    - "S&P 500"
+    - "Russell"
+    - "earnings"
+    - "Fed"
+    - "FOMC"
+    - "CPI"
+    - "PPI"
+    - "NFP"
+    - "treasury"
+    - "yield"
+    - "bond"
+    - "VIX"
+    - "options"
+    - "put"
+    - "call option"
+    - "IV"
+    - "implied volatility"
+    - "SEC"
+    - "IPO"
+    # -- Macro --
+    - "macro"
+    - "interest rate"
+    - "inflation"
+    - "recession"
+    - "GDP"
+    - "unemployment"
+    - "PMI"
+    - "central bank"
+    - "ECB"
+    - "BOJ"
+    - "PBOC"
+    - "dollar"
+    - "DXY"
+    - "gold"
+    - "oil"
+    - "commodity"
+  exclude:
+    - "Polymarket"
+    - "Kalshi"
+    - "prediction market"
+    - "event contract"
+
+phase_4:
+  # Prediction markets (Polymarket, Kalshi, event contracts)
+  label: "Prediction Market"
+  include:
+    - "Polymarket"
+    - "polymarket"
+    - "Kalshi"
+    - "kalshi"
+    - "prediction market"
+    - "prediction-market"
+    - "event contract"
+    - "event-contract"
+    - "binary option"
+    - "binary outcome"
+    - "election"
+    - "election odds"
+    - "forecast"
+    - "betting market"
+    - "resolution"
+    - "market resolution"
+    - "outcome token"
+    - "conditional token"
+    - "CFTC"
+    - "prediction exchange"
+    - "yes/no market"
+    - "probability market"
+    - "Metaculus"
+    - "Manifold"
+    - "Augur"
+    - "Gnosis"
+  exclude: []
+
+# ==========================================================================
+# Global exclude: keywords that prevent ANY auto-routing (force To-Process/)
+# Use for ambiguous terms that cause too many false positives.
+# ==========================================================================
+global_exclude:
+  - "test"
+  - "testing only"
+  - "ignore"
+  - "spam"
+  - "unsubscribe"
+
+# ==========================================================================
+# Metadata
+# ==========================================================================
+_meta:
+  version: "1.0.0"
+  created: "2026-05-19"
+  last_reviewed: "2026-05-19"
+  next_review: "2026-08-19"    # quarterly review
+  maintainer: "Samuel Wu"
+  notes: |
+    This file is consumed by intel-summarizer agent and community bridges.
+    Keep keywords lowercase-friendly (matching is case-insensitive).
+    Chinese keywords are allowed but must be quoted to keep YAML valid.
+    The file itself must pass the audit script (ASCII content + quoted
+    non-ASCII would still flag; for now all keywords are ASCII/English.
+    Chinese keyword support will be added when bridges output Chinese
+    consistently and we can test the matching behavior).

@@ -385,11 +385,13 @@ function Install-Assets {
         }
     }
 
-    # List all template files recursively (exclude .gitkeep)
-    $files = Get-ChildItem -LiteralPath $srcDir -Recurse -File `
-                | Where-Object { $_.Name -ne '.gitkeep' }
+    # List all files recursively (exclude .gitkeep).
+    # Wrap with @(...) so .Count is always available under StrictMode Latest
+    # (pipeline returning 0 or 1 result would otherwise be $null or scalar).
+    $files = @(Get-ChildItem -LiteralPath $srcDir -Recurse -File `
+                | Where-Object { $_.Name -ne '.gitkeep' })
 
-    if (-not $files -or $files.Count -eq 0) {
+    if ($files.Count -eq 0) {
         Write-Step "$Label dir is empty, nothing to install" 'WARN'
         return
     }

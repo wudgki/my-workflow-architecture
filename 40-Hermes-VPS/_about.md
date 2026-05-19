@@ -6,9 +6,9 @@ Hermes 当前部署在 **VPS**，未来可能迁回 **本地副电脑**。所有
 
 | 目录 | 内容 |
 |---|---|
-| `deploy/` | docker-compose / ansible / systemd 单元 |
+| `deploy/` | docker compose 模板 + 部署 SOP，含 [`docker-compose.example.yml`](./deploy/docker-compose.example.yml) 和 [`README.md`](./deploy/README.md) |
 | `services/` | Hermes 各子服务的配置（Wiki 索引、Agent 调度、Webhook 等） |
-| `env/` | `.env.example`（真值在 `90-Ops/secrets/`） |
+| `env/` | `.env.example`（真值在 `90-Ops/secrets/hermes/`，永不入 git） |
 | `monitoring/` | 日志收集 / 告警规则 / 健康检查 |
 | `runbook/` | 运维 SOP，含 [`migration-vps-to-local.md`](./runbook/migration-vps-to-local.md) |
 

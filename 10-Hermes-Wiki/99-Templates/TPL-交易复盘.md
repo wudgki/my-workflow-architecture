@@ -1,7 +1,21 @@
 ---
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 模板：交易复盘（中文）
-# 使用方：Samuel 人工（必须！agent 不替代决策性复盘）
+# 模板：交易复盘（Agent 辅助 + 人工确认）
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 协作模式（以 front-matter 字段强制）：
+#
+#   agent_allowed: true                  -> Agent 必须参与，自动生成复盘草稿；
+#                                           没有 agent 的草稿就没有数据基础。
+#   review_owner: human                  -> 决策层归人工。Agent 只提议，不拍板。
+#   auto_strategy_change_allowed: false  -> Agent 不得自动改实盘策略 / 风控 /
+#                                           仓位 / 杠杆 / 执行逻辑；改进建议
+#                                           只能进入"候选改进"，经回测+纸面+
+#                                           人工三道闸才能落到实盘。
+#
+# 这是 Phase 3 自动化系统能产生复利的根基：
+#   事实层（Agent 写） -> 归因层（Agent 提议） -> 决策层（人工拍板）
+#   -> 实施层（必须经审批闸门）
+#
 # 产出落地：
 #   Phase 3：10-Hermes-Wiki/30-Phase3-Crypto-Quant/Trade-Reviews/YYYY-MM-DD-<symbol>.md
 #   Phase 4：10-Hermes-Wiki/40-Phase4-Prediction-Market/Trade-Reviews/YYYY-MM-DD-<event>.md
@@ -15,7 +29,17 @@ symbol: "{{标的代码}}"   # 例：BTCUSDT-PERP / TSLA / 某 polymarket 事件
 direction: long          # long | short
 result: win              # win | loss | breakeven | partial
 pnl_pct: {{float}}       # 盈亏百分比，正负数；不写绝对金额
-status: reviewed
+
+# ── 协作模式（请勿改动这三个字段）──────────────────────
+agent_allowed: true                    # Agent 可以也应该写草稿
+review_owner: human                    # 决策层归人工
+auto_strategy_change_allowed: false    # Agent 不得自动改实盘
+# ─────────────────────────────────────────────────────
+
+review_status: agent-drafted   # agent-drafted | human-reviewed | approved | rejected
+agent_version: "{{agent name@version}}"  # 例 intel-summarizer@1.0.0；纯人工写时填 "human"
+reviewed_by: ""                # 人工审阅者，进入 human-reviewed 阶段时填
+reviewed_at: ""                # ISO 时间戳
 tags: [复盘, phase{{N}}, {{trade_type}}, {{symbol}}]
 ---
 
@@ -199,7 +223,54 @@ tags: [复盘, phase{{N}}, {{trade_type}}, {{symbol}}]
 
 ---
 
-## 九、引用
+## 九、人工最终结论与审批（闭环）
+
+> **本节由人工填写，是复盘闭环的最后一步。**
+> Agent 提供了草稿（第一~八节），但最终结论、策略迭代是否采纳、是否需要
+> 回测/纸面验证、是否落地到实盘——全部由人工在本节拍板。
+
+### 9.1 人工对 Agent 草稿的审阅
+
+- [ ] **事实层**（第一~三节）：数据准确，无遗漏 / 发现问题：{{...}}
+- [ ] **归因层**（第四~五节）：对错拆解合理 / 需修正：{{...}}
+- [ ] **改进层**（第六节）：候选规则可接受 / 需删改：{{...}}
+
+### 9.2 人工最终结论
+
+<!-- 一段话：这笔交易你自己认为的核心教训，不是 agent 写的，是你反刍后得出的 -->
+
+{{人工最终结论（1-3 句话）}}
+
+### 9.3 候选改进的处置决定
+
+| 候选改进（来自第六节） | 处置 | 理由 |
+|---|---|---|
+| {{规则 A}} | 采纳 → 进入回测 / 拒绝 / 暂缓 | {{一句话}} |
+| {{规则 B}} | | |
+
+### 9.4 审批闸门
+
+> **采纳的改进必须经过三道闸才能进入实盘，缺一不可：**
+
+| 闸门 | 状态 | 证据 |
+|---|---|---|
+| 1. 回测通过 | ☐ 待做 / ☐ 通过 / ☐ 不通过 | `30-Phases/phase3-.../backtest/<ref>` |
+| 2. 纸面交易 (paper) ≥ N 笔 | ☐ 待做 / ☐ 通过 / ☐ 不通过 | {{paper 结果摘要}} |
+| 3. 人工最终审批 | ☐ 未审 / ☐ 批准上线 / ☐ 打回 | {{签名 + 日期}} |
+
+### 9.5 状态更新
+
+完成本节后，请把 front-matter `review_status` 从 `agent-drafted` 改为：
+
+- `human-reviewed`：已审阅但候选改进还在验证中
+- `approved`：候选改进全部通过三道闸，已落地到实盘
+- `rejected`：本次复盘不产生任何规则变更
+
+并填写 `reviewed_by` 和 `reviewed_at`。
+
+---
+
+## 十、引用
 
 - 同期情报简报：[[{{Daily-Digest-YYYY-MM-DD}}]]
 - 关联策略：[[{{Strategy-Notes/...}}]]
@@ -225,11 +296,21 @@ tags: [复盘, phase{{N}}, {{trade_type}}, {{symbol}}]
    - 单笔重要交易：当日复盘
    - 高频交易：每日收盘后做"日终复盘"，把当天所有交易合写一份
    - 每周日：把本周所有 Trade-Reviews 汇总成一份周度模式分析（非本模板覆盖范围）
-5. 严禁：
-   - 不要给 LLM agent 写"建议下次怎么做"——这是你自己的训练，不能外包
+5. 协作模式（Agent + 人工闭环）：
+   - Agent 可以填写第一~八节（事实 / 归因 / 候选改进）
+   - Agent **不能**填写第九节（人工最终结论与审批）
+   - Agent **不能**直接修改 strategy config / limits.yaml / blacklist.md
+   - Agent 的所有"候选改进"只是提议，必须经第九节三道闸门才能落地
+   - front-matter review_status 流转：agent-drafted -> human-reviewed -> approved/rejected
+6. 严禁（Agent 红线）：
+   - Agent 不得自动修改实盘策略参数 / 风控参数 / 仓位 / 杠杆 / 执行逻辑
+   - Agent 不得把 review_status 改为 approved（只有人工有权）
+   - Agent 不得跳过纸面交易直接建议上线
+7. 严禁（人工自律）：
    - 不要在第六节"规则迭代"上勾选完事但不真的去改文件 / 改 config
    - 不要因为亏钱就把第 4.1 节"做对的事"清空
-6. 与 intel-summarizer 的关系：
+   - 不要跳过三道闸门直接改实盘
+8. 与 intel-summarizer 的关系：
    情报简报负责"市场说了什么"，本复盘负责"我做了什么 / 为什么 / 下次怎么办"。
    两者都是事实，但视角完全不同。
 -->

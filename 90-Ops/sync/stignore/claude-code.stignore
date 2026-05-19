@@ -1,0 +1,46 @@
+// ============================================================
+// .stignore for samuel-aiws-claude-code  (20-Claude-Code/)
+// 安装位置: <Target>/20-Claude-Code/.stignore
+// ============================================================
+
+// Git
+.git
+.gitignore
+
+// 任务执行日志（本机产生，不互传）
+logs/
+*.log
+
+// 本机长跑任务的 memory 状态
+memory/local/
+memory/sessions/
+
+// MCP 运行期产物
+mcp-servers/*/data
+mcp-servers/*/cache
+mcp-servers/*/node_modules
+mcp-servers/*/dist
+mcp-servers/*/.env
+mcp-servers/*/.env.*
+!mcp-servers/*/.env.example
+
+// Skill / Agent 的本地构建产物
+**/dist
+**/build
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/.cache
+
+// 编辑器与系统
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea
+.vscode
+*.swp
+*.swo
+
+// 临时
+*.tmp
+*~

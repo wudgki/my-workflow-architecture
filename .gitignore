@@ -23,7 +23,10 @@ desktop.ini
 *.env
 *.env.*
 !*.env.example
-secrets/
+# Note: do NOT use a broad `secrets/` rule here. Once a directory is excluded,
+# git will not descend into it and the `!` exceptions below cannot re-include
+# tracked files like README.md. We exclude file-by-file with **/secrets/*
+# instead, so the negation rules can actually take effect.
 **/secrets/*
 !**/secrets/.gitkeep
 !**/secrets/README.md

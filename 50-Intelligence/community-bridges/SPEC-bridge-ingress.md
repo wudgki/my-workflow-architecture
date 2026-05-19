@@ -81,11 +81,16 @@ healthcheck:
 
 ### 2.2 `/webhook/discord`
 
-接收 Discord Interactions 或 Bot gateway events（取决于后续选型）。
+接收 Discord Interactions outgoing webhook（HTTP POST）。
+
+**范围说明**：
+- v1 只支持 Discord Interactions request（Application Command / Message Component 等）
+- Discord Gateway events 属于 WebSocket 长连接，不属于 HTTP webhook，不在本服务范围
+- 如需 Gateway events（如实时消息监听），后续需单独设计 worker/service
 
 **请求验证**：
 - 检查 `X-Signature-Ed25519` + `X-Signature-Timestamp` headers
-- 使用 Discord Application Public Key 验证签名
+- 使用 Discord Application Public Key（`DISCORD_PUBLIC_KEY` 环境变量）验证签名
 - 验证失败 → 返回 401，不写盘
 
 ### 2.3 `/webhook/telegram`
@@ -94,15 +99,18 @@ healthcheck:
 
 **请求验证**：
 - 检查 `X-Telegram-Bot-Api-Secret-Token` header
-- 与环境变量中的 secret 比对
+- 与 `TELEGRAM_WEBHOOK_SECRET` 环境变量比对
 - 验证失败 → 返回 401，不写盘
+
+**注意**：`TELEGRAM_BOT_TOKEN` 仅在调用 `setWebhook` API 注册端点时需要，服务运行时验签只用 `TELEGRAM_WEBHOOK_SECRET`。
 
 ### 2.4 `/webhook/feishu`
 
 接收飞书事件订阅回调。
 
 **请求验证**：
-- 验证请求 body 的 signature（使用 Verification Token 或 Encrypt Key）
+- 使用 `FEISHU_VERIFICATION_TOKEN` 验证请求来源
+- 如启用消息加密，使用 `FEISHU_ENCRYPT_KEY` 解密 body
 - 处理飞书的 `url_verification` challenge 请求（返回 challenge token）
 - 验证失败 → 返回 401，不写盘
 
@@ -244,9 +252,12 @@ v1 不实现死信队列。如果消息丢失（crash + 未写盘），该消息
 |---|---|---|---|
 | `INBOX_PATH` | 是 | `/data/inbox` | capture 文件写入根目录 |
 | `KEYWORDS_PATH` | 是 | - | keywords.yaml 的完整路径 |
-| `DISCORD_TOKEN` | 是 | - | Discord bot token（或 public key） |
-| `TELEGRAM_BOT_TOKEN` | 是 | - | Telegram bot token |
-| `FEISHU_WEBHOOK_SECRET` | 是 | - | 飞书 webhook 验签密钥 |
+| `DISCORD_PUBLIC_KEY` | 是 | - | Discord Application Public Key（用于 Interactions 签名校验） |
+| `TELEGRAM_WEBHOOK_SECRET` | 是 | - | 校验 `X-Telegram-Bot-Api-Secret-Token` header |
+| `TELEGRAM_BOT_TOKEN` | 否 | - | 仅在设置 webhook 或主动调用 Bot API 时需要（v1 可暂不填） |
+| `FEISHU_VERIFICATION_TOKEN` | 是 | - | 飞书事件订阅 Verification Token |
+| `FEISHU_ENCRYPT_KEY` | 否 | - | 飞书事件订阅 Encrypt Key（启用加密时必填） |
+| ~~`FEISHU_WEBHOOK_SECRET`~~ | - | - | PR #12 `.env.example` 占位名，实现 PR 应映射到上述两个变量 |
 | `LOG_LEVEL` | 否 | `info` | `debug` / `info` / `warn` / `error` |
 | `LISTEN_PORT` | 否 | `8080` | HTTP 监听端口 |
 | `KEYWORDS_RELOAD_SEC` | 否 | `300` | keywords.yaml 热重载间隔（秒） |
@@ -274,6 +285,7 @@ v1 不实现死信队列。如果消息丢失（crash + 未写盘），该消息
 | Docker healthcheck | `:8080/healthz` | 入 | HTTP GET |
 | watchdog | `:8080/healthz` | 入 | HTTP GET（间接，通过 docker API） |
 | intel-pipelines | /data/inbox/ | 无直接调用 | 通过共享 volume 解耦 |
+| VPS-to-primary sync | /data/inbox/ | 出（未来） | SSH rsync 定时拉取到主电脑（尚未实现，后续 PR） |
 
 ---
 

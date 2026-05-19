@@ -61,7 +61,7 @@ docker compose \
   config
 ```
 
-期望：YAML 解析成功，输出渲染后的 compose 配置。业务 token 为 `REPLACE_ME` 时 compose config 会报变量未设置的 warning，但不影响 cloudflared 单独启动。
+期望：YAML 解析成功，输出渲染后的 compose 配置。注意：`.env` 必须基于 `.env.example` 创建，确保所有 compose 引用的变量都有占位值（哪怕是 `REPLACE_ME`）。不要只写 `CLOUDFLARE_TUNNEL_TOKEN` 一行；否则 `docker compose config` 会因 required variable 缺失而直接失败，例如报错 `ALERT_TELEGRAM_TOKEN missing`。
 
 ---
 

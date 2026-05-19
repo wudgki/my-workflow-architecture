@@ -1,59 +1,61 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    在主电脑 / 副电脑落地 AI-Workspace 蓝图（D:\AI-Workspace）。
+    Initialize AI-Workspace blueprint on primary or secondary machine (D:\AI-Workspace).
 
 .DESCRIPTION
-    幂等脚本：
-    - 在 -Target 目录下创建蓝图定义的全部目录结构
-    - 从 -Source（本蓝图仓库 clone 出来的目录）复制文档（_about.md / README.md / SOP）
-    - 生成 .machine-id（标记本机角色）
-    - 生成 secrets/ 子目录占位
-    - 安装 Wiki 模板（10-Hermes-Wiki/99-Templates/，copy-if-missing）
-    - 安装 Syncthing .stignore（如果 90-Ops/sync/stignore/ 提供模板）
-    - 默认不覆盖已存在的业务文件，仅 -Force 时覆盖文档与模板
-    可重复执行，每次只补齐缺失项。
+    Idempotent script that:
+    - Creates the full directory structure defined in the blueprint
+    - Copies documentation files (_about.md / README.md / SOPs) from -Source
+    - Generates .machine-id (marks machine role)
+    - Creates secrets/ subdirectory placeholders
+    - Installs Wiki templates (10-Hermes-Wiki/99-Templates/, copy-if-missing)
+    - Installs Syncthing .stignore files (from 90-Ops/sync/stignore/ templates)
+    - Does NOT overwrite existing files by default; use -Force to overwrite docs and templates
+    Safe to run repeatedly; each run only fills in missing items.
+
+    Tested on: Windows PowerShell 5.1 and PowerShell 7.x
 
 .PARAMETER Source
-    本蓝图仓库已 clone 到本地的路径。
-    例：C:\Code\my-workflow-architecture
+    Path to the cloned blueprint repository on local disk.
+    Example: C:\Code\my-workflow-architecture
 
 .PARAMETER Target
-    AI-Workspace 落地目录。默认 D:\AI-Workspace
+    AI-Workspace landing directory. Default: D:\AI-Workspace
 
 .PARAMETER Role
-    本机角色：primary | secondary。决定 .machine-id 内容与可写域。
+    Machine role: primary | secondary. Determines .machine-id content and write permissions.
 
 .PARAMETER Hostname
-    本机标识（写入 .machine-id）。默认 = $env:COMPUTERNAME
+    Machine identifier (written to .machine-id). Default: $env:COMPUTERNAME
 
 .PARAMETER Force
-    覆盖已有文档（_about.md / README.md / 三份 SOP）与已有 Wiki 模板（99-Templates/）。
-    **不会**覆盖业务数据（笔记、代码、运行期产物）。
+    Overwrite existing docs (_about.md / README.md / SOPs) and Wiki templates (99-Templates/).
+    Does NOT overwrite business data (notes, code, runtime artifacts).
 
 .PARAMETER DryRun
-    只打印将要执行的操作，不真正改文件系统。
+    Print planned operations without modifying the filesystem.
 
 .EXAMPLE
-    # 主电脑首次落地
+    # Primary machine first-time setup
     .\Init-AIWorkspace.ps1 -Source C:\Code\my-workflow-architecture -Target D:\AI-Workspace -Role primary
 
 .EXAMPLE
-    # 副电脑首次落地（与主机不同的角色）
+    # Secondary machine setup
     .\Init-AIWorkspace.ps1 -Source C:\Code\my-workflow-architecture -Role secondary
 
 .EXAMPLE
-    # 蓝图仓库更新后，覆盖文档但保留业务数据
+    # After blueprint repo update, sync docs (overwrite) but keep business data
     .\Init-AIWorkspace.ps1 -Source C:\Code\my-workflow-architecture -Force
 
 .EXAMPLE
-    # 演练，不动文件系统
+    # Dry run (no filesystem changes)
     .\Init-AIWorkspace.ps1 -Source C:\Code\my-workflow-architecture -Role primary -DryRun
 
 .NOTES
-    作者: Samuel Wu's workflow blueprint
-    依赖: PowerShell 5.1+ 或 PowerShell 7
-    平台: Windows 10/11
+    Author: Samuel Wu workflow blueprint
+    Requires: PowerShell 5.1+ or PowerShell 7
+    Platform: Windows 10/11
 #>
 
 [CmdletBinding()]
@@ -82,10 +84,10 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # ============================================================
-# 1) 蓝图定义：目录列表 + 文档清单
+# 1) Blueprint definition: directory list + document manifest
 # ============================================================
 
-# 顶层 + 子目录（与 README.md / _about.md 中的描述保持一致）
+# Top-level + subdirectories (mirrors README.md / _about.md structure)
 $Directories = @(
     '00-Inbox',
     '00-Inbox/Discord-Captures',
@@ -183,7 +185,7 @@ $Directories = @(
     '90-Ops/scripts'
 )
 
-# 从 Source 复制到 Target 的文档（路径相对仓库根 / 落地根）
+# Documents to copy from Source to Target (paths relative to repo root)
 $DocFiles = @(
     'README.md',
     '.gitignore',
@@ -205,18 +207,17 @@ $DocFiles = @(
     '90-Ops/scripts/Init-AIWorkspace.ps1'
 )
 
-# Syncthing 共享根 -> 在 Target 内对应路径
-# 用于把 90-Ops/sync/stignore/<scope>.stignore 安装为 <Target>/<path>/.stignore
+# Syncthing share roots -> target subdirectory mapping
 $SyncShares = @{
-    'wiki'        = '10-Hermes-Wiki'
-    'claude-code' = '20-Claude-Code'
-    'phases'      = '30-Phases'
-    'inbox'       = '00-Inbox'
-    'repo-research' = '60-Repo-Research'
+    'wiki'           = '10-Hermes-Wiki'
+    'claude-code'    = '20-Claude-Code'
+    'phases'         = '30-Phases'
+    'inbox'          = '00-Inbox'
+    'repo-research'  = '60-Repo-Research'
 }
 
 # ============================================================
-# 2) 工具函数
+# 2) Utility functions
 # ============================================================
 
 function Write-Step {
@@ -242,15 +243,15 @@ function Test-IsAdmin {
 function Ensure-Dir {
     param([string]$Path)
     if (Test-Path -LiteralPath $Path -PathType Container) {
-        Write-Step "目录已存在: $Path" 'SKIP'
+        Write-Step "Dir exists: $Path" 'SKIP'
         return
     }
     if ($DryRun) {
-        Write-Step "创建目录: $Path" 'INFO'
+        Write-Step "Would create dir: $Path" 'INFO'
         return
     }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    Write-Step "创建目录: $Path" 'OK'
+    Write-Step "Created dir: $Path" 'OK'
 }
 
 function Copy-Doc {
@@ -263,7 +264,7 @@ function Copy-Doc {
     $dst = Join-Path $DstRoot $Relative
 
     if (-not (Test-Path -LiteralPath $src)) {
-        Write-Step "源文件缺失，跳过: $Relative" 'WARN'
+        Write-Step "Source missing, skip: $Relative" 'WARN'
         return
     }
 
@@ -276,12 +277,12 @@ function Copy-Doc {
 
     if (Test-Path -LiteralPath $dst) {
         if (-not $Force) {
-            Write-Step "文档已存在（用 -Force 覆盖）: $Relative" 'SKIP'
+            Write-Step "Doc exists (use -Force to overwrite): $Relative" 'SKIP'
             return
         }
-        Write-Step "覆盖文档: $Relative" 'WARN'
+        Write-Step "Overwriting doc: $Relative" 'WARN'
     } else {
-        Write-Step "复制文档: $Relative" 'OK'
+        Write-Step "Copy doc: $Relative" 'OK'
     }
 
     if (-not $DryRun) {
@@ -297,19 +298,18 @@ function Write-FileIfMissing {
     )
     if (Test-Path -LiteralPath $Path) {
         if (-not $Force) {
-            Write-Step "$Description 已存在: $Path" 'SKIP'
+            Write-Step "$Description exists: $Path" 'SKIP'
             return
         }
-        Write-Step "覆盖 $Description : $Path" 'WARN'
+        Write-Step "Overwriting $Description : $Path" 'WARN'
     } else {
-        Write-Step "写入 $Description : $Path" 'OK'
+        Write-Step "Writing $Description : $Path" 'OK'
     }
     if ($DryRun) { return }
     $dir = Split-Path $Path -Parent
     if (-not (Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
-    # PS 5.1 的 -Encoding UTF8 会写入 BOM；YAML / Markdown 工具均能识别，可接受。
     Set-Content -LiteralPath $Path -Value $Content -Encoding UTF8
 }
 
@@ -321,13 +321,13 @@ function Install-StIgnore {
     )
     $tplDir = Join-Path $SrcRoot '90-Ops/sync/stignore'
     if (-not (Test-Path -LiteralPath $tplDir)) {
-        Write-Step ".stignore 模板目录不存在，跳过 Syncthing 步骤: $tplDir" 'WARN'
+        Write-Step ".stignore template dir missing, skip Syncthing step: $tplDir" 'WARN'
         return
     }
     foreach ($scope in $Shares.Keys) {
         $tpl = Join-Path $tplDir "$scope.stignore"
         if (-not (Test-Path -LiteralPath $tpl)) {
-            Write-Step "无模板，跳过 .stignore for '$scope'" 'SKIP'
+            Write-Step "No template, skip .stignore for '$scope'" 'SKIP'
             continue
         }
         $shareRoot = Join-Path $DstRoot $Shares[$scope]
@@ -336,25 +336,25 @@ function Install-StIgnore {
             if (-not $DryRun) { New-Item -ItemType Directory -Path $shareRoot -Force | Out-Null }
         }
         if ((Test-Path -LiteralPath $dst) -and (-not $Force)) {
-            Write-Step ".stignore 已存在（用 -Force 覆盖）: $($Shares[$scope])" 'SKIP'
+            Write-Step ".stignore exists (use -Force to overwrite): $($Shares[$scope])" 'SKIP'
             continue
         }
         if (-not $DryRun) { Copy-Item -LiteralPath $tpl -Destination $dst -Force }
-        Write-Step "安装 .stignore: $($Shares[$scope])" 'OK'
+        Write-Step "Installed .stignore: $($Shares[$scope])" 'OK'
     }
 }
 
 function Install-Templates {
     <#
     .SYNOPSIS
-        把 Wiki 模板（10-Hermes-Wiki/99-Templates/）安装到目标工作区。
+        Install Wiki templates (10-Hermes-Wiki/99-Templates/) to target workspace.
 
     .DESCRIPTION
-        - 整目录递归扫描源端模板（含 _about.md 与所有 TPL-*.md / 子目录）
-        - 默认 copy-if-missing：目标已存在 → 输出 SKIP 提示，不动文件
-        - 仅当 -Force 显式启用时才覆盖目标
-        - DryRun 模式：列出**每个**会被复制或跳过的模板文件
-        - 路径锁定为 10-Hermes-Wiki/99-Templates/（与产出落地约定一致）
+        - Recursively scans source template directory (including _about.md and all TPL-*.md)
+        - Default: copy-if-missing. If target file exists, outputs SKIP and leaves it untouched
+        - Only overwrites when -Force is explicitly set
+        - DryRun mode: lists every template file that would be copied or skipped
+        - Path is locked to 10-Hermes-Wiki/99-Templates/
     #>
     param(
         [string]$SrcRoot,
@@ -366,26 +366,26 @@ function Install-Templates {
     $dstDir = Join-Path $DstRoot $relativeRoot
 
     if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) {
-        Write-Step "Wiki 模板源目录不存在，跳过模板安装: $srcDir" 'WARN'
+        Write-Step "Wiki template source dir missing, skip: $srcDir" 'WARN'
         return
     }
 
-    # 确保目标目录存在
+    # Ensure target directory exists
     if (-not (Test-Path -LiteralPath $dstDir -PathType Container)) {
         if ($DryRun) {
-            Write-Step "将创建目录: $relativeRoot" 'INFO'
+            Write-Step "Would create dir: $relativeRoot" 'INFO'
         } else {
             New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
-            Write-Step "创建目录: $relativeRoot" 'OK'
+            Write-Step "Created dir: $relativeRoot" 'OK'
         }
     }
 
-    # 递归列出所有模板文件（排除 .gitkeep）
+    # List all template files recursively (exclude .gitkeep)
     $files = Get-ChildItem -LiteralPath $srcDir -Recurse -File `
                 | Where-Object { $_.Name -ne '.gitkeep' }
 
     if (-not $files -or $files.Count -eq 0) {
-        Write-Step '模板目录为空，无文件可安装' 'WARN'
+        Write-Step 'Template dir is empty, nothing to install' 'WARN'
         return
     }
 
@@ -394,12 +394,12 @@ function Install-Templates {
     $countOverwrite = 0
 
     foreach ($f in $files) {
-        # 计算相对路径（兼容子目录）
+        # Compute relative path (handles subdirectories)
         $relativeFile = $f.FullName.Substring($srcDir.Length).TrimStart('\', '/')
         $dst = Join-Path $dstDir $relativeFile
         $displayPath = "$relativeRoot/$($relativeFile -replace '\\', '/')"
 
-        # 父目录（如模板有子目录结构）
+        # Ensure parent directory
         $dstParent = Split-Path $dst -Parent
         if (-not (Test-Path -LiteralPath $dstParent)) {
             if (-not $DryRun) {
@@ -409,20 +409,18 @@ function Install-Templates {
 
         if (Test-Path -LiteralPath $dst) {
             if ($Force) {
-                # 覆盖路径
-                Write-Step "覆盖模板: $displayPath" 'WARN'
+                Write-Step "Overwrite template: $displayPath" 'WARN'
                 if (-not $DryRun) {
                     Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
                 }
                 $countOverwrite++
             } else {
-                # copy-if-missing：跳过
-                Write-Step "模板已存在（用 -Force 覆盖）: $displayPath" 'SKIP'
+                # copy-if-missing: skip existing
+                Write-Step "Template exists (use -Force to overwrite): $displayPath" 'SKIP'
                 $countSkip++
             }
         } else {
-            # 新增
-            Write-Step "复制模板: $displayPath" 'OK'
+            Write-Step "Copy template: $displayPath" 'OK'
             if (-not $DryRun) {
                 Copy-Item -LiteralPath $f.FullName -Destination $dst -Force
             }
@@ -430,12 +428,12 @@ function Install-Templates {
         }
     }
 
-    # 小结
-    Write-Step "模板安装小结: 新增 $countCopy / 覆盖 $countOverwrite / 跳过 $countSkip （共 $($files.Count) 文件）" 'INFO'
+    # Summary
+    Write-Step "Templates summary: copied=$countCopy / overwritten=$countOverwrite / skipped=$countSkip (total=$($files.Count))" 'INFO'
 }
 
 # ============================================================
-# 3) 预检
+# 3) Pre-flight checks
 # ============================================================
 
 Write-Host ''
@@ -444,142 +442,141 @@ Write-Host '  AI-Workspace Blueprint Initializer' -ForegroundColor Magenta
 Write-Host '=================================================' -ForegroundColor Magenta
 Write-Host ''
 
-Write-Step "蓝图源:   $Source"
-Write-Step "落地目标: $Target"
-Write-Step "角色:     $(if ($Role) { $Role } else { '<未指定，跳过 .machine-id>' })"
-Write-Step "本机名:   $Hostname"
+Write-Step "Source:   $Source"
+Write-Step "Target:   $Target"
+Write-Step "Role:     $(if ($Role) { $Role } else { '<not specified, skip .machine-id>' })"
+Write-Step "Hostname: $Hostname"
 Write-Step "Force:    $Force"
 Write-Step "DryRun:   $DryRun"
 Write-Host ''
 
-# 校验 Source
+# Validate Source
 if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
-    throw "蓝图源目录不存在: $Source"
+    throw "Blueprint source directory does not exist: $Source"
 }
 $readme = Join-Path $Source 'README.md'
 $signature = Join-Path $Source '90-Ops/multi-machine-protocol.md'
 if (-not (Test-Path -LiteralPath $readme) -or -not (Test-Path -LiteralPath $signature)) {
-    throw "Source 看起来不是有效的蓝图仓库（缺少 README.md 或 90-Ops/multi-machine-protocol.md）: $Source"
+    throw "Source does not look like a valid blueprint repo (missing README.md or 90-Ops/multi-machine-protocol.md): $Source"
 }
 
-# 校验 Target 父目录可达
+# Validate Target parent exists
 $parent = Split-Path $Target -Parent
 if ($parent -and -not (Test-Path -LiteralPath $parent)) {
-    throw "Target 父目录不存在: $parent"
+    throw "Target parent directory does not exist: $parent"
 }
 
 if (-not (Test-IsAdmin)) {
-    Write-Step '当前非管理员权限运行（创建 D:\AI-Workspace 通常无需管理员，继续）' 'INFO'
+    Write-Step 'Running without admin privileges (usually fine for D:\AI-Workspace)' 'INFO'
 }
 
 # ============================================================
-# 4) 创建 Target 根
+# 4) Create Target root
 # ============================================================
 
 Ensure-Dir -Path $Target
 
 # ============================================================
-# 5) 创建全部目录
+# 5) Create all directories
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 1/5: 创建目录骨架' 'INFO'
+Write-Step 'Phase 1/5: Creating directory skeleton' 'INFO'
 foreach ($d in $Directories) {
     Ensure-Dir -Path (Join-Path $Target $d)
 }
 
 # ============================================================
-# 6) 复制文档
+# 6) Copy documents
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 2/5: 复制文档（_about / SOP / README）' 'INFO'
+Write-Step 'Phase 2/5: Copying documents (_about / SOP / README)' 'INFO'
 foreach ($f in $DocFiles) {
     Copy-Doc -SrcRoot $Source -DstRoot $Target -Relative $f
 }
 
 # ============================================================
-# 7) 生成 .machine-id（如指定 Role）
+# 7) Generate .machine-id (if Role specified)
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 3/5: 生成本机标识与配置文件' 'INFO'
+Write-Step 'Phase 3/5: Generating machine identity and config' 'INFO'
 
 if ($Role) {
     $machineIdPath = Join-Path $Target '.machine-id'
     $now = (Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')
     $machineIdContent = @"
-# AI-Workspace machine identity (本文件不入 git，参见 .gitignore)
+# AI-Workspace machine identity (not tracked by git, see .gitignore)
 hostname: $Hostname
 role: $Role
 initialized_at: $now
 last_handover: null
 notes: |
-  本文件由 90-Ops/scripts/Init-AIWorkspace.ps1 生成。
-  写入受限目录前，脚本应检查本文件的 role 字段。
+  Generated by 90-Ops/scripts/Init-AIWorkspace.ps1
+  Scripts should check the role field before writing to restricted directories.
 "@
     Write-FileIfMissing -Path $machineIdPath -Content $machineIdContent -Description '.machine-id'
 }
 else {
-    Write-Step '未指定 -Role，跳过 .machine-id 生成' 'SKIP'
+    Write-Step 'No -Role specified, skipping .machine-id generation' 'SKIP'
 }
 
-# 顶层 .gitignore 中已经忽略了 .machine-id 之类的本地文件；这里给 secrets/ 加一个 README（如果还没有）
+# Ensure secrets/README.md was copied (sanity check)
 $secretsReadme = Join-Path $Target '90-Ops/secrets/README.md'
 if (-not (Test-Path -LiteralPath $secretsReadme)) {
-    # 已通过 DocFiles 复制；这里只兜底
-    Write-Step '90-Ops/secrets/README.md 应已通过 DocFiles 复制，请检查' 'INFO'
+    Write-Step '90-Ops/secrets/README.md should have been copied via DocFiles, please verify' 'INFO'
 }
 
-# 生成 secrets 子目录的 .gitkeep（保证空目录可见）
+# Create secrets subdirectory placeholders
 foreach ($scope in @('shared', 'phase2', 'phase3', 'phase4', 'hermes', 'intel')) {
     $keep = Join-Path $Target "90-Ops/secrets/$scope/.gitkeep"
     if (-not (Test-Path -LiteralPath $keep)) {
         if (-not $DryRun) { New-Item -ItemType File -Path $keep -Force | Out-Null }
-        Write-Step "占位文件: 90-Ops/secrets/$scope/.gitkeep" 'OK'
+        Write-Step "Placeholder: 90-Ops/secrets/$scope/.gitkeep" 'OK'
     }
 }
 
 # ============================================================
-# 8) 安装 Wiki 模板 (10-Hermes-Wiki/99-Templates/)
+# 8) Install Wiki templates (10-Hermes-Wiki/99-Templates/)
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 4/5: 安装 Wiki 模板（99-Templates/）' 'INFO'
+Write-Step 'Phase 4/5: Installing Wiki templates (99-Templates/)' 'INFO'
 Install-Templates -SrcRoot $Source -DstRoot $Target
 
 # ============================================================
-# 9) 安装 Syncthing .stignore
+# 9) Install Syncthing .stignore
 # ============================================================
 
 Write-Host ''
-Write-Step '阶段 5/5: 安装 Syncthing .stignore（如有模板）' 'INFO'
+Write-Step 'Phase 5/5: Installing Syncthing .stignore (if templates available)' 'INFO'
 Install-StIgnore -SrcRoot $Source -DstRoot $Target -Shares $SyncShares
 
 # ============================================================
-# 9) 生成本机操作摘要
+# 10) Summary and next steps
 # ============================================================
 
 Write-Host ''
 Write-Host '=================================================' -ForegroundColor Magenta
-Write-Host '  完成。后续手动步骤建议：' -ForegroundColor Magenta
+Write-Host '  Done. Suggested next steps:' -ForegroundColor Magenta
 Write-Host '=================================================' -ForegroundColor Magenta
 Write-Host ''
 
-Write-Host "  1) 把 $Target 加入 Syncthing：参考 $Source\90-Ops\sync\README.md"
-Write-Host "  2) 在 $Target\90-Ops\secrets\ 各子目录放入对应 .env（永不入 git）"
-Write-Host "  3) 主电脑：把 10-Hermes-Wiki\.obsidian\ 配置好后，先在副电脑保持只读"
-Write-Host "  4) 在仓库变更后，定期重新执行本脚本（可加 -Force 同步文档更新）："
+Write-Host "  1) Add $Target to Syncthing: see $Source\90-Ops\sync\README.md"
+Write-Host "  2) Place .env files in $Target\90-Ops\secrets\ subdirectories (never commit)"
+Write-Host "  3) Primary: configure 10-Hermes-Wiki\.obsidian\, keep secondary read-only"
+Write-Host "  4) After blueprint updates, re-run with -Force to sync docs:"
 Write-Host "       .\Init-AIWorkspace.ps1 -Source $Source -Target $Target -Force"
 Write-Host ''
 
 if ($Role -eq 'secondary') {
-    Write-Host '  注意：本机角色=secondary，默认 10-Hermes-Wiki/ 只读。' -ForegroundColor Yellow
-    Write-Host '       仅在主机不可用时按 multi-machine-protocol.md 第六节执行接管流程。' -ForegroundColor Yellow
+    Write-Host '  NOTE: This machine role=secondary. 10-Hermes-Wiki/ defaults to read-only.' -ForegroundColor Yellow
+    Write-Host '        Only take over when primary is unavailable (see multi-machine-protocol.md section 6).' -ForegroundColor Yellow
     Write-Host ''
 }
 
 if ($DryRun) {
-    Write-Host '  本次为 DryRun，文件系统未变更。去掉 -DryRun 实际执行。' -ForegroundColor Yellow
+    Write-Host '  This was a DRY RUN. No filesystem changes were made. Remove -DryRun to execute.' -ForegroundColor Yellow
     Write-Host ''
 }

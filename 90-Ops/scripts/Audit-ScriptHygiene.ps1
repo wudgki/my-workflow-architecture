@@ -523,6 +523,12 @@ function Invoke-FileAudit {
 # ============================================================
 
 function Get-FilesToAudit {
+    # NOTE on StrictMode Latest:
+    # Get-ChildItem / Where-Object pipelines may return $null (zero results),
+    # a single object (one result), or an object[] (multiple results). Under
+    # Set-StrictMode -Version Latest, calling .Count on the first two cases
+    # throws PropertyNotFoundStrict. We force every collection variable into
+    # an array with @(...) so .Count is always safe downstream.
     param(
         [string]$Root,
         [bool]$DoRecurse,
@@ -536,22 +542,28 @@ function Get-FilesToAudit {
         # Get-ChildItem -Include only works with -Recurse or trailing wildcard,
         # so we always pass -Recurse and filter manually if needed.
         $params.Recurse = $true
-        $all = Get-ChildItem @params
+        $all = @(Get-ChildItem @params)
         if (-not $DoRecurse) {
-            $all = $all | Where-Object { $_.Directory.FullName -eq $rootItem.FullName }
+            $all = @($all | Where-Object { $_.Directory.FullName -eq $rootItem.FullName })
         }
     } else {
         $all = @($rootItem)
     }
 
-    # Apply excludes
-    $filtered = foreach ($f in $all) {
-        $skip = $false
-        foreach ($pat in $ExcludePatterns) {
-            if ($f.FullName -like ('*' + $pat + '*')) { $skip = $true; break }
+    # Apply excludes. Wrap with @(...) so the result is always an array
+    # (even when 0 or 1 file passes the filter).
+    $filtered = @(
+        foreach ($f in $all) {
+            $skip = $false
+            foreach ($pat in $ExcludePatterns) {
+                if ($f.FullName -like ('*' + $pat + '*')) { $skip = $true; break }
+            }
+            if (-not $skip) { $f }
         }
-        if (-not $skip) { $f }
-    }
+    )
+    # The caller wraps our return with @(...) so we don't need the unary
+    # comma trick here; PowerShell will unwrap a 1-element return on the
+    # function boundary and the caller's @(...) re-wraps it.
     return $filtered
 }
 
@@ -624,9 +636,12 @@ if (-not (Test-Path -LiteralPath $Path)) {
 
 $psExtensions = @('.ps1', '.psm1', '.psd1')
 
-$files = Get-FilesToAudit -Root $Path -DoRecurse $Recurse `
-                          -IncludeGlobs $Include -ExcludePatterns $ExcludePath
-if (-not $files -or $files.Count -eq 0) {
+# Force the result into an array so .Count is always available, even when
+# Get-FilesToAudit returns 0 or 1 file. Strict Mode 'Latest' would otherwise
+# throw PropertyNotFoundStrict on a scalar or $null.
+$files = @(Get-FilesToAudit -Root $Path -DoRecurse $Recurse `
+                            -IncludeGlobs $Include -ExcludePatterns $ExcludePath)
+if ($files.Count -eq 0) {
     Write-Host "No files matched. Path=$Path Include=$($Include -join ',')" -ForegroundColor Yellow
     exit 0
 }
@@ -656,6 +671,12 @@ foreach ($f in $files) {
     }
 }
 
+# Defensive re-wrap: if the loop happened to add exactly one result, += keeps
+# it as an array, but downstream Measure-Object / Where-Object pipelines can
+# still produce $null .Sum or non-array .Count. We compute aggregates with
+# fallbacks below.
+$allResults = @($allResults)
+
 # JSON output
 if ($Format -eq 'json') {
     $payload = [pscustomobject]@{
@@ -667,11 +688,22 @@ if ($Format -eq 'json') {
     $payload | ConvertTo-Json -Depth 6
 }
 
-# Aggregate totals
-$totalCritical = ($allResults | Measure-Object -Property CriticalCount -Sum).Sum
-$totalWarning  = ($allResults | Measure-Object -Property WarningCount  -Sum).Sum
-$totalInfo     = ($allResults | Measure-Object -Property InfoCount     -Sum).Sum
-$totalErrors   = ($allResults | Where-Object { $_.ReadError }).Count
+# Aggregate totals.
+# Measure-Object .Sum returns $null when input is empty; coalesce to 0.
+# Where-Object pipelines need @(...) before .Count under StrictMode Latest.
+function Get-IntOrZero {
+    param($Value)
+    if ($null -eq $Value) { return 0 }
+    return [int]$Value
+}
+
+$sumCritical = ($allResults | Measure-Object -Property CriticalCount -Sum).Sum
+$sumWarning  = ($allResults | Measure-Object -Property WarningCount  -Sum).Sum
+$sumInfo     = ($allResults | Measure-Object -Property InfoCount     -Sum).Sum
+$totalCritical = Get-IntOrZero $sumCritical
+$totalWarning  = Get-IntOrZero $sumWarning
+$totalInfo     = Get-IntOrZero $sumInfo
+$totalErrors   = @($allResults | Where-Object { $_.ReadError }).Count
 
 if ($Format -ne 'json') {
     Write-Host ''

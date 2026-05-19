@@ -134,6 +134,13 @@ services:
       DISK_FREE_THRESHOLD_GB: ${DISK_FREE_THRESHOLD_GB:-5}
       WATCH_TARGETS: bridge-ingress,intel-pipelines,cloudflared
     volumes:
+      # WARNING: docker.sock is a HIGH-PRIVILEGE boundary.
+      # This :ro mount is a PLACEHOLDER for development. Before going live:
+      #   - Consider docker-socket-proxy (tecnativa/docker-socket-proxy)
+      #   - Or host-side watchdog (systemd timer + shell script)
+      #   - Or Prometheus + cAdvisor
+      # NEVER give untrusted containers access to docker.sock.
+      # See deploy/README.md "docker.sock security" section.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - hermes-logs:/logs:ro
     deploy:

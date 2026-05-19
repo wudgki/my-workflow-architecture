@@ -1,0 +1,38 @@
+// ============================================================
+// .stignore for samuel-aiws-inbox  (00-Inbox/)
+// 安装位置: <Target>/00-Inbox/.stignore
+// ============================================================
+
+// Git
+.git
+.gitignore
+
+// 自动过期归档：占空间且对副电脑无价值
+**/_archive/auto-expired/
+
+// 大文件（PDF / 视频应放 Wiki 的 _attachments/ 或外存）
+*.zip
+*.tar.gz
+*.7z
+*.iso
+*.dmg
+*.mp4
+*.mov
+*.mkv
+
+// bridge 临时下载
+**/_tmp/
+**/.partial/
+**/*.partial
+
+// 编辑器与系统
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea
+.vscode
+*.swp
+*.swo
+
+// 日志
+*.log

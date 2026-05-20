@@ -3,14 +3,14 @@
 
 FROM python:3.12-alpine AS builder
 WORKDIR /build
-RUN apk add --no-cache build-base libffi-dev
+RUN apk add --no-cache build-base
 COPY requirements.txt .
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 FROM python:3.12-alpine AS runtime
-RUN apk add --no-cache curl tini libffi \
+RUN apk add --no-cache curl tini \
     && addgroup -S bridge && adduser -S -G bridge -h /app bridge
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv

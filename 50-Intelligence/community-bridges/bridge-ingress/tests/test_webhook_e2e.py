@@ -83,7 +83,7 @@ def test_webhook_correct_secret_writes_file(
     assert name.endswith("_telegram_-100_17.md")
 
     body = captures[0].read_text(encoding="utf-8")
-    assert "phase: 4" in body
+    assert "phase: phase_4" in body
     assert "chat_id: -100" in body
     assert "message_id: 17" in body
     assert "Polymarket election odds drifting" in body

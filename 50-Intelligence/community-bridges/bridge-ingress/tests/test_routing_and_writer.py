@@ -27,10 +27,10 @@ def router(keywords_yaml: Path) -> PhaseRouter:
 @pytest.mark.parametrize(
     "text, expected",
     [
-        ("BTC perp 4h breakout", 3),
-        ("Polymarket election odds shifting", 4),
-        ("Hermes infra status check", 1),
-        ("Jinguan packaging RFP", 2),
+        ("BTC perp 4h breakout", "phase_3"),
+        ("Polymarket election odds shifting", "phase_4"),
+        ("Hermes infra status check", "phase_1"),
+        ("Jinguan packaging RFP", "phase_2"),
         ("please ignore smoke test", None),    # global_exclude
         ("smoke noise demo", None),            # global_exclude
         ("random foo bar", None),              # no match
@@ -38,13 +38,13 @@ def router(keywords_yaml: Path) -> PhaseRouter:
         ("", None),                            # empty
     ],
 )
-def test_route(router: PhaseRouter, text: str, expected: int | None) -> None:
+def test_route(router: PhaseRouter, text: str, expected: str | None) -> None:
     assert router.route(text) == expected
 
 
 def test_router_first_match_wins_lowest_phase_first(router: PhaseRouter) -> None:
     # Text mentions both phase_1 (mcp) and phase_3 (btc): phase_1 wins.
-    assert router.route("mcp + btc perp combo") == 1
+    assert router.route("mcp + btc perp combo") == "phase_1"
 
 
 def test_router_hot_reload_picks_up_new_keywords(tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ def test_router_hot_reload_picks_up_new_keywords(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     r = PhaseRouter(str(p))
-    assert r.route("foo bar") == 1
+    assert r.route("foo bar") == "phase_1"
     assert r.route("hello bar") is None
 
     # Bump mtime by a few seconds so detection works regardless of fs
@@ -75,7 +75,7 @@ def test_router_hot_reload_picks_up_new_keywords(tmp_path: Path) -> None:
     os.utime(p, (new_mtime, new_mtime))
     reloaded = r.reload_if_changed()
     assert reloaded is True
-    assert r.route("foo bar") == 2
+    assert r.route("foo bar") == "phase_2"
     assert r.route("foo only") is None
 
 
@@ -136,7 +136,7 @@ def test_filename_and_frontmatter(router: PhaseRouter, inbox_dir: Path) -> None:
         bridge_version="0.1.0-test",
     )
 
-    assert result["phase"] == 3
+    assert result["phase"] == "phase_3"
     assert result["chat_id"] == -100200
     assert result["message_id"] == 88
 
@@ -161,7 +161,7 @@ def test_filename_and_frontmatter(router: PhaseRouter, inbox_dir: Path) -> None:
     assert fm["source_id"] == "telegram:-100200:88"
     assert fm["chat_id"] == -100200
     assert fm["message_id"] == 88
-    assert fm["phase"] == 3
+    assert fm["phase"] == "phase_3"
     assert fm["status"] == "raw"
     assert fm["priority"] == "p2"
     assert fm["owner"] == "intel-summarizer"
@@ -217,7 +217,7 @@ def test_caption_used_when_no_text(
     result = write_telegram_capture(
         payload, str(inbox_dir), router, "0.1.0-test"
     )
-    assert result["phase"] == 2
+    assert result["phase"] == "phase_2"
 
 
 def test_missing_chat_id_raises(

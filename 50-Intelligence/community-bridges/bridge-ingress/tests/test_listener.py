@@ -109,8 +109,15 @@ _SKIP_REASON = (
 class TestTelegramIntegration:
     """Tests that require a real Telegram session. Skipped by default."""
 
-    @pytest.mark.asyncio
-    async def test_connect_and_disconnect(self) -> None:
+    def test_connect_and_disconnect(self) -> None:
+        # NOTE: This test requires pytest-asyncio to run as a coroutine.
+        # Since the entire class is skipped unless RUN_TG_INTEGRATION=1,
+        # we use asyncio.run() directly to avoid requiring pytest-asyncio
+        # as a default test dependency.
+        import asyncio
+        asyncio.run(self._connect_and_disconnect())
+
+    async def _connect_and_disconnect(self) -> None:
         # This test only runs when explicitly enabled with real creds.
         listener = TelegramListener(
             api_id=int(os.environ["TG_API_ID"]),

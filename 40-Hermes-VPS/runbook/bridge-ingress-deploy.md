@@ -14,7 +14,7 @@ listener），使其 7x24 监听指定群组消息并落盘到 `/data/inbox/Tele
 - [ ] PR #13 Cloudflare Tunnel smoke test 已通过
 - [ ] VPS 已安装 Docker Engine（24+）
 - [ ] 已在本地完成 `generate_session.py`，拿到 `TG_SESSION_STRING`
-- [ ] 已通过 `list_dialogs.py` 确认目标群 chat_id
+- [ ] 已确认目标群 chat_id，可通过 `list_dialogs.py`（如已合并）或其他可信方式获取
 - [ ] VPS 可访问 Telegram MTProto 服务器（端口 443 出站）
 
 ---
@@ -40,8 +40,8 @@ cat > .env << 'EOF'
 TG_API_ID=<你的api_id>
 TG_API_HASH=<你的api_hash>
 TG_SESSION_STRING=<你的session_string>
-TG_MEME_CHAT_IDS=-1002948440512
-TG_CONTRACT_CHAT_IDS=-1003150146675,-1003116474257,-1003151436192
+TG_MEME_CHAT_IDS=-100xxxxxxxxxx
+TG_CONTRACT_CHAT_IDS=-100yyyyyyyyyy,-100zzzzzzzzzz
 INBOX_PATH=/data/inbox
 KEYWORDS_PATH=/blueprint/50-Intelligence/pipelines/keywords.yaml
 LOG_LEVEL=info

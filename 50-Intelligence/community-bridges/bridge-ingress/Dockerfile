@@ -1,27 +1,14 @@
 # syntax=docker/dockerfile:1.6
 #
-# bridge-ingress: Telegram-only webhook receiver (PR #15).
+# bridge-ingress: Telegram MTProto listener + healthcheck (v0.2.0).
 # Multi-stage build on alpine. Target: < 100 MB final image.
-#
-# Build:
-#   docker build -t bridge-ingress:dev .
-#
-# Run (local smoke test, see tests/smoke-test.sh for the full flow):
-#   docker run -d --name bridge-ingress \
-#     -e TELEGRAM_WEBHOOK_SECRET=fake-secret-for-local-test \
-#     -v /tmp/inbox:/data/inbox \
-#     -v $PWD/../../pipelines/keywords.yaml:/blueprint/50-Intelligence/pipelines/keywords.yaml:ro \
-#     -p 8080:8080 bridge-ingress:dev
-
 
 # ---------- builder ----------
 FROM python:3.12-alpine AS builder
 
 WORKDIR /build
 
-# build-base is needed for any C extension wheels that lack a musl
-# wheel on PyPI (PyYAML's CExtension is the typical one).
-RUN apk add --no-cache build-base
+RUN apk add --no-cache build-base libffi-dev
 
 COPY requirements.txt .
 
@@ -33,9 +20,7 @@ RUN python -m venv /opt/venv \
 # ---------- runtime ----------
 FROM python:3.12-alpine AS runtime
 
-# curl: required for the docker compose healthcheck declared in PR #12.
-# tini: PID 1 / signal forwarding so SIGTERM cleanly stops uvicorn.
-RUN apk add --no-cache curl tini \
+RUN apk add --no-cache curl tini libffi \
     && addgroup -S bridge \
     && adduser -S -G bridge -h /app bridge
 
@@ -49,6 +34,7 @@ COPY --chown=bridge:bridge \
     phase_router.py \
     inbox_writer.py \
     logger.py \
+    tg_listener.py \
     /app/
 
 ENV PATH=/opt/venv/bin:$PATH \

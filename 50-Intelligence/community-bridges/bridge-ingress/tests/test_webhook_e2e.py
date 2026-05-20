@@ -1,13 +1,13 @@
 """End-to-end FastAPI tests using TestClient.
 
-These tests cover the full request path: signature verification, JSON
-parsing, phase routing, and inbox writing. They do NOT require a real
-Telegram bot, real network, or real secrets.
+The MTProto listener is replaced with a FakeListener stub so tests
+never import or instantiate real Telethon objects.
 
 ASCII-only.
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 from pathlib import Path
@@ -23,23 +23,65 @@ _RELOAD_TARGETS = (
     "inbox_writer",
     "logger",
     "signature",
+    "tg_listener",
 )
+
+
+class _FakeListener:
+    """Stub that satisfies ListenerProtocol without touching Telethon."""
+
+    def __init__(self, **kwargs: object) -> None:
+        self._connected = False
+        self._messages_processed = 0
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @property
+    def messages_processed(self) -> int:
+        return self._messages_processed
+
+    async def start(self) -> None:
+        self._connected = True
+
+    async def run_until_disconnected(self) -> None:
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+
+    async def stop(self) -> None:
+        self._connected = False
 
 
 @pytest.fixture
 def client(app_env) -> TestClient:
-    # Force a fresh import of main with the patched env so each test
-    # builds its own FastAPI app bound to its own tmp inbox/keywords.
+    """Create a TestClient with a fake listener (no Telethon)."""
     for mod in _RELOAD_TARGETS:
         sys.modules.pop(mod, None)
-    main = importlib.import_module("main")
-    return TestClient(main.app)
+
+    main_mod = importlib.import_module("main")
+    config_mod = importlib.import_module("config")
+
+    settings = config_mod.load_settings()
+
+    def fake_factory(s: object) -> _FakeListener:
+        return _FakeListener()
+
+    test_app = main_mod.create_app(
+        settings=settings, listener_factory=fake_factory
+    )
+    with TestClient(test_app) as c:
+        yield c
 
 
 def test_healthz(client: TestClient) -> None:
     res = client.get("/healthz")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok"}
+    data = res.json()
+    assert data["status"] == "ok"
+    assert data["listener_connected"] is True
 
 
 def test_webhook_missing_secret_returns_401(client: TestClient) -> None:
@@ -120,7 +162,6 @@ def test_webhook_bad_json_returns_400(
 def test_webhook_array_payload_returns_400(
     client: TestClient, fake_secret: str
 ) -> None:
-    # Valid JSON but not a Telegram update (array, not object).
     res = client.post(
         "/webhook/telegram",
         json=[1, 2, 3],

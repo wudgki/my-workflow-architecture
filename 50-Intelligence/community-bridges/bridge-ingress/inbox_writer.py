@@ -57,8 +57,13 @@ def write_telegram_capture(
     inbox_path: str,
     phase_router: PhaseRouter,
     bridge_version: str,
+    watch_category: str | None = None,
 ) -> dict[str, Any]:
     """Write one Telegram update to disk.
+
+    Args:
+        watch_category: "meme" or "contract" when called from MTProto
+            listener; None when called from legacy webhook endpoint.
 
     Returns:
         dict with keys: phase (str|None, e.g. "phase_3"), file (absolute path),
@@ -126,6 +131,7 @@ def write_telegram_capture(
         "message_date": message_dt_iso,
         "from_username": sender_username or "",
         "phase": phase,
+        "watch_category": watch_category,
         "tags": [],
         "status": "raw",
         "priority": "p2",

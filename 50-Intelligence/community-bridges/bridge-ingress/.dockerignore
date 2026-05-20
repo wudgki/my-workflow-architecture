@@ -1,0 +1,40 @@
+# bridge-ingress .dockerignore
+# Keeps the build context tiny and prevents secrets / dev junk from
+# leaking into the image layer.
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tests are NOT shipped in the runtime image.
+tests/
+
+# Documentation does not need to be inside the container.
+README.md
+
+# Local secrets / env files - never enter the build context.
+.env
+.env.*
+*.pem
+*.key
+
+# Git metadata
+.git/
+.gitignore
+
+# Docker meta
+Dockerfile
+.dockerignore
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

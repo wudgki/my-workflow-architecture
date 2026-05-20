@@ -1,0 +1,19 @@
+{
+  "update_id": 1234567890,
+  "message": {
+    "message_id": 4242,
+    "date": 1715000000,
+    "chat": {
+      "id": -100199988877,
+      "type": "supergroup",
+      "title": "fake test group, not a real chat"
+    },
+    "from": {
+      "id": 1,
+      "is_bot": false,
+      "first_name": "smoke",
+      "username": "smoke_test_user"
+    },
+    "text": "BTC perp 4h breakout, watching for confirmation"
+  }
+}

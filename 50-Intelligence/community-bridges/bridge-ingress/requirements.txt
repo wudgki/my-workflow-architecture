@@ -1,0 +1,8 @@
+# bridge-ingress runtime dependencies
+# Pinned to exact versions for reproducible builds.
+# Update via deliberate PR; never let the lockstep drift in main.
+
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+pyyaml==6.0.2
+pydantic==2.9.2

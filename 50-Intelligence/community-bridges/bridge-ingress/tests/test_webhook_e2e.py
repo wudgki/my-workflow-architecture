@@ -22,6 +22,7 @@ class _FakeListener:
     def __init__(self, **kwargs: object) -> None:
         self._connected = False
         self._messages_processed = 0
+        self.last_error = ""
 
     @property
     def connected(self) -> bool:

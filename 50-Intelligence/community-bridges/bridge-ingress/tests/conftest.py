@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -18,6 +19,9 @@ if str(_BRIDGE_DIR) not in sys.path:
 
 
 _FAKE_SECRET = "fake-secret-for-tests-do-not-use"
+_FAKE_API_ID = "12345678"
+_FAKE_API_HASH = "abcdef1234567890abcdef1234567890"
+_FAKE_SESSION = "fake-session-string-for-tests"
 
 
 @pytest.fixture
@@ -70,7 +74,16 @@ def app_env(
     keywords_yaml: Path,
     inbox_dir: Path,
 ):
-    """Patch env vars before main.py is imported by the e2e test client."""
+    """Patch env vars before main.py is imported by the e2e test client.
+
+    Provides both MTProto listener vars (required in v0.2.0) and the
+    legacy webhook secret so both code paths are testable.
+    """
+    monkeypatch.setenv("TG_API_ID", _FAKE_API_ID)
+    monkeypatch.setenv("TG_API_HASH", _FAKE_API_HASH)
+    monkeypatch.setenv("TG_SESSION_STRING", _FAKE_SESSION)
+    monkeypatch.setenv("TG_MEME_CHAT_IDS", "-100111,-100222")
+    monkeypatch.setenv("TG_CONTRACT_CHAT_IDS", "-100333")
     monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", fake_secret)
     monkeypatch.setenv("KEYWORDS_PATH", str(keywords_yaml))
     monkeypatch.setenv("INBOX_PATH", str(inbox_dir))

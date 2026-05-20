@@ -1,8 +1,11 @@
 """End-to-end FastAPI tests using TestClient.
 
 These tests cover the full request path: signature verification, JSON
-parsing, phase routing, and inbox writing. They do NOT require a real
-Telegram bot, real network, or real secrets.
+parsing, phase routing, and inbox writing via the legacy webhook endpoint.
+They do NOT require a real Telegram bot, real network, or real secrets.
+
+The MTProto listener is mocked out so tests do not attempt a real
+Telegram connection.
 
 ASCII-only.
 """
@@ -11,6 +14,7 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +27,7 @@ _RELOAD_TARGETS = (
     "inbox_writer",
     "logger",
     "signature",
+    "tg_listener",
 )
 
 
@@ -32,14 +37,26 @@ def client(app_env) -> TestClient:
     # builds its own FastAPI app bound to its own tmp inbox/keywords.
     for mod in _RELOAD_TARGETS:
         sys.modules.pop(mod, None)
-    main = importlib.import_module("main")
-    return TestClient(main.app)
+
+    # Mock TelegramListener so no real MTProto connection is attempted.
+    with patch("main.TelegramListener") as MockListener:
+        instance = MockListener.return_value
+        instance.start = AsyncMock()
+        instance.run_until_disconnected = AsyncMock()
+        instance.stop = AsyncMock()
+        instance.connected = True
+        instance.messages_processed = 0
+
+        main = importlib.import_module("main")
+        with TestClient(main.app) as c:
+            yield c
 
 
 def test_healthz(client: TestClient) -> None:
     res = client.get("/healthz")
     assert res.status_code == 200
-    assert res.json() == {"status": "ok"}
+    data = res.json()
+    assert data["status"] == "ok"
 
 
 def test_webhook_missing_secret_returns_401(client: TestClient) -> None:
@@ -120,7 +137,6 @@ def test_webhook_bad_json_returns_400(
 def test_webhook_array_payload_returns_400(
     client: TestClient, fake_secret: str
 ) -> None:
-    # Valid JSON but not a Telegram update (array, not object).
     res = client.post(
         "/webhook/telegram",
         json=[1, 2, 3],

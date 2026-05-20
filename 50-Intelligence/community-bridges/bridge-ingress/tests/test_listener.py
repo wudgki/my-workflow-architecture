@@ -1,12 +1,22 @@
 """Unit tests for tg_listener.py.
 
-Tests the listener logic (chat categorization, payload construction,
-writing) WITHOUT a real Telegram connection. Telethon is mocked.
+Tests the listener logic (chat categorization, chat ID parsing) WITHOUT
+a real Telegram connection. These tests import only _parse_chat_ids and
+exercise TelegramListener's non-network methods.
+
+NOTE: TelegramListener.__init__ does NOT call Telethon. It only stores
+config and creates a PhaseRouter. The actual Telethon StringSession is
+only created inside start(), which is never called in these unit tests.
+
+For real Telegram integration tests, set RUN_TG_INTEGRATION=1 and
+provide real TG_API_ID / TG_API_HASH / TG_SESSION_STRING env vars.
+Those tests are skipped by default.
 
 ASCII-only.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -44,16 +54,17 @@ def test_parse_chat_ids_trailing_comma() -> None:
 
 
 # --------------------------------------------------------------------- #
-# TelegramListener categorization
+# TelegramListener categorization (no network, no Telethon session)
 # --------------------------------------------------------------------- #
 
 
 @pytest.fixture
 def listener(keywords_yaml: Path, inbox_dir: Path) -> TelegramListener:
+    """Create a listener with fake credentials (start() is NOT called)."""
     return TelegramListener(
         api_id=12345678,
-        api_hash="fake_hash",
-        session_string="fake_session",
+        api_hash="fake_hash_for_unit_tests",
+        session_string="will-not-be-used-because-start-is-not-called",
         meme_chat_ids=[-100111, -100222],
         contract_chat_ids=[-100333, -100444],
         inbox_path=str(inbox_dir),
@@ -78,3 +89,43 @@ def test_categorize_unknown(listener: TelegramListener) -> None:
 def test_initial_state(listener: TelegramListener) -> None:
     assert listener.connected is False
     assert listener.messages_processed == 0
+
+
+# --------------------------------------------------------------------- #
+# Integration tests (skipped unless RUN_TG_INTEGRATION=1)
+# --------------------------------------------------------------------- #
+
+
+_SKIP_REASON = (
+    "Real Telegram integration test. Set RUN_TG_INTEGRATION=1 and "
+    "provide TG_API_ID / TG_API_HASH / TG_SESSION_STRING to run."
+)
+
+
+@pytest.mark.skipif(
+    os.environ.get("RUN_TG_INTEGRATION") != "1",
+    reason=_SKIP_REASON,
+)
+class TestTelegramIntegration:
+    """Tests that require a real Telegram session. Skipped by default."""
+
+    @pytest.mark.asyncio
+    async def test_connect_and_disconnect(self) -> None:
+        # This test only runs when explicitly enabled with real creds.
+        listener = TelegramListener(
+            api_id=int(os.environ["TG_API_ID"]),
+            api_hash=os.environ["TG_API_HASH"],
+            session_string=os.environ["TG_SESSION_STRING"],
+            meme_chat_ids=_parse_chat_ids(
+                os.environ.get("TG_MEME_CHAT_IDS", "")
+            ),
+            contract_chat_ids=_parse_chat_ids(
+                os.environ.get("TG_CONTRACT_CHAT_IDS", "")
+            ),
+            inbox_path="/tmp/test-inbox",
+            keywords_path="/dev/null",
+        )
+        await listener.start()
+        assert listener.connected is True
+        await listener.stop()
+        assert listener.connected is False

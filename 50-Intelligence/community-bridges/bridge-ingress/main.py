@@ -9,6 +9,11 @@ Architecture:
 The MTProto listener runs as a background asyncio task that starts
 when the FastAPI lifespan begins and stops on shutdown (SIGTERM).
 
+Testability:
+  create_app() accepts an optional listener_factory callable. When None
+  (production), it creates a real TelegramListener. Tests inject a fake
+  factory that returns a stub, so pytest never touches Telethon.
+
 ASCII-only.
 """
 from __future__ import annotations
@@ -17,7 +22,7 @@ import asyncio
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Callable, Optional, Protocol
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 
@@ -32,13 +37,25 @@ from tg_listener import TelegramListener, _parse_chat_ids
 _BRIDGE_VERSION = "0.2.0"
 
 
-def _build_app() -> FastAPI:
-    settings: Settings = load_settings()
-    init_logger(settings.log_level)
-    log = get_logger("bridge-ingress")
-    router = PhaseRouter(settings.keywords_path)
+class ListenerProtocol(Protocol):
+    """Minimal interface that main.py requires from a listener."""
 
-    listener = TelegramListener(
+    @property
+    def connected(self) -> bool: ...
+
+    @property
+    def messages_processed(self) -> int: ...
+
+    async def start(self) -> None: ...
+
+    async def run_until_disconnected(self) -> None: ...
+
+    async def stop(self) -> None: ...
+
+
+def _default_listener_factory(settings: Settings) -> TelegramListener:
+    """Production factory: creates a real TelegramListener."""
+    return TelegramListener(
         api_id=settings.tg_api_id,
         api_hash=settings.tg_api_hash,
         session_string=settings.tg_session_string,
@@ -47,6 +64,30 @@ def _build_app() -> FastAPI:
         inbox_path=settings.inbox_path,
         keywords_path=settings.keywords_path,
     )
+
+
+def create_app(
+    settings: Optional[Settings] = None,
+    listener_factory: Optional[Callable[[Settings], Any]] = None,
+) -> FastAPI:
+    """Build the FastAPI application.
+
+    Args:
+        settings: If None, loaded from environment variables.
+        listener_factory: Callable(settings) -> listener instance.
+            If None, uses _default_listener_factory (real Telethon).
+            Tests pass a fake factory to avoid real Telegram connections.
+    """
+    if settings is None:
+        settings = load_settings()
+
+    init_logger(settings.log_level)
+    log = get_logger("bridge-ingress")
+    router = PhaseRouter(settings.keywords_path)
+
+    if listener_factory is None:
+        listener_factory = _default_listener_factory
+    listener = listener_factory(settings)
 
     log.info(
         "bridge_ingress_started",
@@ -173,4 +214,15 @@ def _build_app() -> FastAPI:
     return app
 
 
-app = _build_app()
+# Module-level app for uvicorn: `uvicorn main:app`
+# Guarded so that pytest (which sets _TESTING=1 or imports create_app
+# directly) does not trigger a real Telethon session on import.
+import os as _os
+
+if _os.environ.get("_BRIDGE_SKIP_AUTO_CREATE") != "1":
+    app = create_app()
+else:
+    # Placeholder so `from main import app` does not raise AttributeError
+    # in test modules that need to reference the name before calling
+    # create_app() themselves.
+    app = None  # type: ignore[assignment]

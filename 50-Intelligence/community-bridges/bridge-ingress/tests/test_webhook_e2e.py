@@ -4,8 +4,8 @@ These tests cover the full request path: signature verification, JSON
 parsing, phase routing, and inbox writing via the legacy webhook endpoint.
 They do NOT require a real Telegram bot, real network, or real secrets.
 
-The MTProto listener is mocked out so tests do not attempt a real
-Telegram connection.
+The MTProto listener is replaced with a FakeListener stub so tests
+never import or instantiate real Telethon objects.
 
 ASCII-only.
 """
@@ -14,7 +14,6 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,25 +30,59 @@ _RELOAD_TARGETS = (
 )
 
 
+class _FakeListener:
+    """Stub that satisfies ListenerProtocol without touching Telethon."""
+
+    def __init__(self, **kwargs: object) -> None:
+        self._connected = False
+        self._messages_processed = 0
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @property
+    def messages_processed(self) -> int:
+        return self._messages_processed
+
+    async def start(self) -> None:
+        self._connected = True
+
+    async def run_until_disconnected(self) -> None:
+        # In tests this coroutine is wrapped in a task that gets
+        # cancelled on shutdown. Just await forever until cancelled.
+        import asyncio
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            pass
+
+    async def stop(self) -> None:
+        self._connected = False
+
+
 @pytest.fixture
 def client(app_env) -> TestClient:
-    # Force a fresh import of main with the patched env so each test
-    # builds its own FastAPI app bound to its own tmp inbox/keywords.
+    """Create a TestClient with a fake listener (no Telethon)."""
+    # Clear cached modules so config picks up patched env vars.
     for mod in _RELOAD_TARGETS:
         sys.modules.pop(mod, None)
 
-    # Mock TelegramListener so no real MTProto connection is attempted.
-    with patch("main.TelegramListener") as MockListener:
-        instance = MockListener.return_value
-        instance.start = AsyncMock()
-        instance.run_until_disconnected = AsyncMock()
-        instance.stop = AsyncMock()
-        instance.connected = True
-        instance.messages_processed = 0
+    # Import main fresh with env already patched.
+    main_mod = importlib.import_module("main")
+    config_mod = importlib.import_module("config")
 
-        main = importlib.import_module("main")
-        with TestClient(main.app) as c:
-            yield c
+    settings = config_mod.load_settings()
+
+    # Use create_app with a fake listener factory.
+    def fake_factory(s: object) -> _FakeListener:
+        return _FakeListener()
+
+    test_app = main_mod.create_app(
+        settings=settings, listener_factory=fake_factory
+    )
+    with TestClient(test_app) as c:
+        yield c
 
 
 def test_healthz(client: TestClient) -> None:
@@ -57,6 +90,7 @@ def test_healthz(client: TestClient) -> None:
     assert res.status_code == 200
     data = res.json()
     assert data["status"] == "ok"
+    assert data["listener_connected"] is True
 
 
 def test_webhook_missing_secret_returns_401(client: TestClient) -> None:

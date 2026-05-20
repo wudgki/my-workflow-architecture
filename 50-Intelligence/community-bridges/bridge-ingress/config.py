@@ -1,6 +1,9 @@
 """Environment-driven settings for bridge-ingress.
 
-ASCII-only by repo convention. All user-facing prose lives in README.md.
+v0.2.0: Added MTProto listener settings. TELEGRAM_WEBHOOK_SECRET is
+now optional (set to enable legacy webhook endpoint).
+
+ASCII-only by repo convention.
 """
 from __future__ import annotations
 
@@ -10,11 +13,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Settings:
-    telegram_webhook_secret: str
+    tg_api_id: int
+    tg_api_hash: str
+    tg_session_string: str
+    tg_meme_chat_ids: str
+    tg_contract_chat_ids: str
     inbox_path: str
     keywords_path: str
     log_level: str
     listen_port: int
+    telegram_webhook_secret: str
 
 
 def _require(name: str) -> str:
@@ -25,14 +33,31 @@ def _require(name: str) -> str:
 
 
 def load_settings() -> Settings:
-    """Load settings from process environment.
+    """Load settings from process environment."""
+    tg_api_id_raw = _require("TG_API_ID")
+    try:
+        tg_api_id = int(tg_api_id_raw)
+    except ValueError:
+        raise RuntimeError("TG_API_ID must be an integer")
 
-    TELEGRAM_WEBHOOK_SECRET is the only mandatory variable. The rest fall
-    back to the same defaults documented in SPEC-bridge-ingress.md so a
-    container started with only the secret will still work in production.
-    """
+    tg_api_hash = _require("TG_API_HASH")
+    tg_session_string = _require("TG_SESSION_STRING")
+
+    meme_ids = os.environ.get("TG_MEME_CHAT_IDS", "")
+    contract_ids = os.environ.get("TG_CONTRACT_CHAT_IDS", "")
+
+    if not meme_ids.strip() and not contract_ids.strip():
+        raise RuntimeError(
+            "at least one of TG_MEME_CHAT_IDS or TG_CONTRACT_CHAT_IDS "
+            "must be set"
+        )
+
     return Settings(
-        telegram_webhook_secret=_require("TELEGRAM_WEBHOOK_SECRET"),
+        tg_api_id=tg_api_id,
+        tg_api_hash=tg_api_hash,
+        tg_session_string=tg_session_string,
+        tg_meme_chat_ids=meme_ids,
+        tg_contract_chat_ids=contract_ids,
         inbox_path=os.environ.get("INBOX_PATH", "/data/inbox"),
         keywords_path=os.environ.get(
             "KEYWORDS_PATH",
@@ -40,4 +65,5 @@ def load_settings() -> Settings:
         ),
         log_level=os.environ.get("LOG_LEVEL", "info"),
         listen_port=int(os.environ.get("LISTEN_PORT", "8080")),
+        telegram_webhook_secret=os.environ.get("TELEGRAM_WEBHOOK_SECRET", ""),
     )

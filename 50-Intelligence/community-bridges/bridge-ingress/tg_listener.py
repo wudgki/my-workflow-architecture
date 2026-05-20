@@ -13,20 +13,24 @@ Design notes:
   - Graceful shutdown: disconnect on SIGTERM/SIGINT (docker stop).
   - The Telethon client is ONLY created inside start(). __init__ does
     NOT touch Telethon, making the class safe to instantiate in tests.
+  - start() does NOT raise on connection failure. It stores the error in
+    last_error and sets connected=False. The caller (main.py lifespan)
+    can proceed without blocking FastAPI startup.
 
 ASCII-only.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+import traceback
+from typing import Optional, Tuple
 
 from inbox_writer import write_telegram_capture
 from logger import get_logger
 from phase_router import PhaseRouter
 
 
-_BRIDGE_VERSION = "0.2.0"
+_BRIDGE_VERSION = "0.2.1"
 
 
 def _parse_chat_ids(raw: str) -> list[int]:
@@ -60,6 +64,10 @@ class TelegramListener:
         contract_chat_ids: list[int],
         inbox_path: str,
         keywords_path: str,
+        dc_id: Optional[int] = None,
+        server_address: str = "",
+        server_port: int = 443,
+        proxy: Optional[Tuple] = None,
     ) -> None:
         self._api_id = api_id
         self._api_hash = api_hash
@@ -73,6 +81,11 @@ class TelegramListener:
         self._client = None  # created in start()
         self._connected = False
         self._messages_processed = 0
+        self._last_error: str = ""
+        self._dc_id = dc_id
+        self._server_address = server_address
+        self._server_port = server_port
+        self._proxy = proxy
 
     @property
     def connected(self) -> bool:
@@ -81,6 +94,10 @@ class TelegramListener:
     @property
     def messages_processed(self) -> int:
         return self._messages_processed
+
+    @property
+    def last_error(self) -> str:
+        return self._last_error
 
     def _categorize(self, chat_id: int) -> Optional[str]:
         """Return monitoring category for a chat, or None if not whitelisted."""
@@ -94,7 +111,24 @@ class TelegramListener:
         """Connect to Telegram and register the message handler.
 
         This is the ONLY method that imports and uses Telethon.
+
+        IMPORTANT: This method does NOT raise exceptions. On failure it
+        sets self._connected = False and self._last_error with a
+        human-readable error string. The caller (main.py) can inspect
+        these via /healthz without the HTTP server being blocked.
         """
+        try:
+            await self._do_start()
+        except Exception as exc:
+            self._connected = False
+            self._last_error = str(exc)
+            self._log.error(
+                "tg_listener_start_failed",
+                extra={"reason": self._last_error},
+            )
+
+    async def _do_start(self) -> None:
+        """Internal start logic; may raise."""
         from telethon import TelegramClient, events
         from telethon.sessions import StringSession
 
@@ -104,13 +138,33 @@ class TelegramListener:
                 "version": _BRIDGE_VERSION,
                 "meme_chats": len(self._meme_ids),
                 "contract_chats": len(self._contract_ids),
+                "dc_override": bool(self._dc_id and self._server_address),
+                "proxy_configured": bool(self._proxy),
             },
         )
 
+        session = StringSession(self._session_string)
+
+        # Apply DC endpoint override if configured.
+        if self._dc_id and self._server_address:
+            session.set_dc(
+                self._dc_id, self._server_address, self._server_port
+            )
+            self._log.info(
+                "tg_listener_dc_override_applied",
+                extra={
+                    "dc_id": self._dc_id,
+                    "server_port": self._server_port,
+                },
+            )
+
+        # Build client kwargs; add proxy if configured.
+        client_kwargs: dict = {}
+        if self._proxy:
+            client_kwargs["proxy"] = self._proxy
+
         self._client = TelegramClient(
-            StringSession(self._session_string),
-            self._api_id,
-            self._api_hash,
+            session, self._api_id, self._api_hash, **client_kwargs
         )
 
         self._client.add_event_handler(
@@ -120,19 +174,13 @@ class TelegramListener:
 
         await self._client.connect()
         if not await self._client.is_user_authorized():
-            self._log.error(
-                "tg_listener_not_authorized",
-                extra={
-                    "reason": "session expired or invalid, "
-                    "regenerate via generate_session.py"
-                },
-            )
             raise RuntimeError(
                 "Telegram session not authorized. "
                 "Run generate_session.py to create a new session string."
             )
 
         self._connected = True
+        self._last_error = ""
         me = await self._client.get_me()
         self._log.info(
             "tg_listener_connected",
@@ -143,15 +191,30 @@ class TelegramListener:
         )
 
     async def run_until_disconnected(self) -> None:
-        """Block until the client disconnects (e.g. on SIGTERM)."""
-        if self._client is None:
-            raise RuntimeError("call start() first")
-        await self._client.run_until_disconnected()
+        """Block until the client disconnects (e.g. on SIGTERM).
+
+        If the client was never connected (start failed), this returns
+        immediately without raising.
+        """
+        if self._client is None or not self._connected:
+            return
+        try:
+            await self._client.run_until_disconnected()
+        except Exception as exc:
+            self._connected = False
+            self._last_error = "disconnected: " + str(exc)
+            self._log.warning(
+                "tg_listener_disconnected_unexpectedly",
+                extra={"reason": self._last_error},
+            )
 
     async def stop(self) -> None:
         """Gracefully disconnect from Telegram."""
         if self._client is not None:
-            await self._client.disconnect()
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
             self._connected = False
             self._log.info(
                 "tg_listener_stopped",

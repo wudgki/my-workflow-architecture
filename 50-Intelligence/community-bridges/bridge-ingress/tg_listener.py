@@ -30,7 +30,7 @@ from logger import get_logger
 from phase_router import PhaseRouter
 
 
-_BRIDGE_VERSION = "0.2.1"
+_BRIDGE_VERSION = "0.2.2"
 
 
 def _parse_chat_ids(raw: str) -> list[int]:
@@ -222,65 +222,136 @@ class TelegramListener:
             )
 
     async def _on_new_message(self, event) -> None:
-        """Handle a new message from a whitelisted chat."""
-        message = event.message
-        chat_id = event.chat_id
-        category = self._categorize(chat_id)
+        """Handle a new message from a whitelisted chat.
 
-        if category is None:
-            return
-
-        self._router.reload_if_changed()
-
-        text = message.text or message.message or ""
-
-        sender = await event.get_sender()
-        sender_username = ""
-        sender_id = 0
-        if sender is not None:
-            sender_username = getattr(sender, "username", "") or ""
-            sender_id = getattr(sender, "id", 0) or 0
-
-        payload = {
-            "update_id": 0,
-            "message": {
-                "message_id": message.id,
-                "date": int(message.date.timestamp()) if message.date else 0,
-                "chat": {"id": chat_id, "type": "supergroup"},
-                "from": {"id": sender_id, "username": sender_username},
-                "text": text,
-            },
-        }
+        This method NEVER raises. All exceptions are caught, logged with
+        full context, and the listener continues processing future events.
+        """
+        chat_id: Optional[int] = None
+        message_id: Optional[int] = None
 
         try:
-            result = write_telegram_capture(
-                payload=payload,
-                inbox_path=self._inbox_path,
-                phase_router=self._router,
-                bridge_version=_BRIDGE_VERSION,
-                watch_category=category,
-            )
-        except ValueError as exc:
-            self._log.warning(
-                "tg_listener_message_skipped",
+            chat_id = getattr(event, "chat_id", None)
+            message = getattr(event, "message", None)
+            message_id = getattr(message, "id", None) if message else None
+
+            # Safe text extraction (avoid deprecated .message alias).
+            raw_text = ""
+            if message is not None:
+                raw_text = getattr(message, "text", None) or ""
+                if not raw_text:
+                    raw_text = getattr(message, "raw_text", None) or ""
+
+            has_text = bool(raw_text)
+            text_length = len(raw_text)
+
+            category = self._categorize(chat_id) if chat_id is not None else None
+            is_target = category is not None
+
+            self._log.info(
+                "tg_event_received",
                 extra={
                     "chat_id": chat_id,
-                    "message_id": message.id,
-                    "category": category,
-                    "reason": str(exc),
+                    "message_id": message_id,
+                    "has_text": has_text,
+                    "text_length": text_length,
+                    "is_target_chat": is_target,
+                    "watch_category": category,
                 },
             )
-            return
 
-        self._messages_processed += 1
-        self._log.info(
-            "tg_listener_capture_written",
-            extra={
-                "source": "telegram",
-                "category": category,
-                "phase": result["phase"],
-                "file": result["file"],
-                "chat_id": result["chat_id"],
-                "message_id": result["message_id"],
-            },
-        )
+            if not is_target:
+                self._log.info(
+                    "ignored_not_target_chat",
+                    extra={"chat_id": chat_id, "message_id": message_id},
+                )
+                return
+
+            if not has_text:
+                self._log.info(
+                    "ignored_empty_text",
+                    extra={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "watch_category": category,
+                    },
+                )
+                return
+
+            self._router.reload_if_changed()
+
+            # Safe sender lookup.
+            sender_username = ""
+            sender_id = 0
+            try:
+                sender = await event.get_sender()
+                if sender is not None:
+                    sender_username = getattr(sender, "username", "") or ""
+                    sender_id = getattr(sender, "id", 0) or 0
+            except Exception:
+                pass
+
+            # Safe date extraction.
+            msg_date = getattr(message, "date", None)
+            date_ts = 0
+            if msg_date is not None:
+                try:
+                    date_ts = int(msg_date.timestamp())
+                except Exception:
+                    date_ts = 0
+
+            payload = {
+                "update_id": 0,
+                "message": {
+                    "message_id": message_id,
+                    "date": date_ts,
+                    "chat": {"id": chat_id, "type": "supergroup"},
+                    "from": {"id": sender_id, "username": sender_username},
+                    "text": raw_text,
+                },
+            }
+
+            try:
+                result = write_telegram_capture(
+                    payload=payload,
+                    inbox_path=self._inbox_path,
+                    phase_router=self._router,
+                    bridge_version=_BRIDGE_VERSION,
+                    watch_category=category,
+                )
+            except Exception as exc:
+                self._log.error(
+                    "ignored_writer_error",
+                    extra={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "watch_category": category,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    },
+                )
+                return
+
+            self._messages_processed += 1
+            self._log.info(
+                "tg_listener_capture_written",
+                extra={
+                    "source": "telegram",
+                    "category": category,
+                    "phase": result["phase"],
+                    "file": result["file"],
+                    "chat_id": result["chat_id"],
+                    "message_id": result["message_id"],
+                },
+            )
+
+        except Exception as exc:
+            self._log.error(
+                "tg_message_handler_error",
+                extra={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                },
+            )

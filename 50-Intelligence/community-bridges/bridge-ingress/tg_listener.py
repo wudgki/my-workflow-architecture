@@ -13,20 +13,25 @@ Design notes:
   - Graceful shutdown: disconnect on SIGTERM/SIGINT (docker stop).
   - The Telethon client is ONLY created inside start(). __init__ does
     NOT touch Telethon, making the class safe to instantiate in tests.
+  - start() does NOT raise on connection failure. It stores the error in
+    last_error and sets connected=False.
+  - _on_new_message has full try/except: exceptions are logged but never
+    kill the listener.
 
 ASCII-only.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+import traceback as tb_mod
+from typing import Optional, Tuple
 
 from inbox_writer import write_telegram_capture
 from logger import get_logger
 from phase_router import PhaseRouter
 
 
-_BRIDGE_VERSION = "0.2.0"
+_BRIDGE_VERSION = "0.2.2"
 
 
 def _parse_chat_ids(raw: str) -> list[int]:
@@ -60,6 +65,10 @@ class TelegramListener:
         contract_chat_ids: list[int],
         inbox_path: str,
         keywords_path: str,
+        dc_id: Optional[int] = None,
+        server_address: str = "",
+        server_port: int = 443,
+        proxy: Optional[Tuple] = None,
     ) -> None:
         self._api_id = api_id
         self._api_hash = api_hash
@@ -73,6 +82,11 @@ class TelegramListener:
         self._client = None  # created in start()
         self._connected = False
         self._messages_processed = 0
+        self._last_error: str = ""
+        self._dc_id = dc_id
+        self._server_address = server_address
+        self._server_port = server_port
+        self._proxy = proxy
 
     @property
     def connected(self) -> bool:
@@ -81,6 +95,10 @@ class TelegramListener:
     @property
     def messages_processed(self) -> int:
         return self._messages_processed
+
+    @property
+    def last_error(self) -> str:
+        return self._last_error
 
     def _categorize(self, chat_id: int) -> Optional[str]:
         """Return monitoring category for a chat, or None if not whitelisted."""
@@ -93,8 +111,21 @@ class TelegramListener:
     async def start(self) -> None:
         """Connect to Telegram and register the message handler.
 
-        This is the ONLY method that imports and uses Telethon.
+        IMPORTANT: This method does NOT raise exceptions. On failure it
+        sets self._connected = False and self._last_error.
         """
+        try:
+            await self._do_start()
+        except Exception as exc:
+            self._connected = False
+            self._last_error = str(exc)
+            self._log.error(
+                "tg_listener_start_failed",
+                extra={"reason": self._last_error},
+            )
+
+    async def _do_start(self) -> None:
+        """Internal start logic; may raise."""
         from telethon import TelegramClient, events
         from telethon.sessions import StringSession
 
@@ -104,15 +135,34 @@ class TelegramListener:
                 "version": _BRIDGE_VERSION,
                 "meme_chats": len(self._meme_ids),
                 "contract_chats": len(self._contract_ids),
+                "dc_override": bool(self._dc_id and self._server_address),
+                "proxy_configured": bool(self._proxy),
             },
         )
 
+        session = StringSession(self._session_string)
+
+        if self._dc_id and self._server_address:
+            session.set_dc(
+                self._dc_id, self._server_address, self._server_port
+            )
+            self._log.info(
+                "tg_listener_dc_override_applied",
+                extra={
+                    "dc_id": self._dc_id,
+                    "server_port": self._server_port,
+                },
+            )
+
+        client_kwargs: dict = {}
+        if self._proxy:
+            client_kwargs["proxy"] = self._proxy
+
         self._client = TelegramClient(
-            StringSession(self._session_string),
-            self._api_id,
-            self._api_hash,
+            session, self._api_id, self._api_hash, **client_kwargs
         )
 
+        # Register handler BEFORE connect.
         self._client.add_event_handler(
             self._on_new_message,
             events.NewMessage(chats=list(self._all_ids)),
@@ -120,19 +170,13 @@ class TelegramListener:
 
         await self._client.connect()
         if not await self._client.is_user_authorized():
-            self._log.error(
-                "tg_listener_not_authorized",
-                extra={
-                    "reason": "session expired or invalid, "
-                    "regenerate via generate_session.py"
-                },
-            )
             raise RuntimeError(
                 "Telegram session not authorized. "
                 "Run generate_session.py to create a new session string."
             )
 
         self._connected = True
+        self._last_error = ""
         me = await self._client.get_me()
         self._log.info(
             "tg_listener_connected",
@@ -143,15 +187,26 @@ class TelegramListener:
         )
 
     async def run_until_disconnected(self) -> None:
-        """Block until the client disconnects (e.g. on SIGTERM)."""
-        if self._client is None:
-            raise RuntimeError("call start() first")
-        await self._client.run_until_disconnected()
+        """Block until the client disconnects."""
+        if self._client is None or not self._connected:
+            return
+        try:
+            await self._client.run_until_disconnected()
+        except Exception as exc:
+            self._connected = False
+            self._last_error = "disconnected: " + str(exc)
+            self._log.warning(
+                "tg_listener_disconnected_unexpectedly",
+                extra={"reason": self._last_error},
+            )
 
     async def stop(self) -> None:
         """Gracefully disconnect from Telegram."""
         if self._client is not None:
-            await self._client.disconnect()
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
             self._connected = False
             self._log.info(
                 "tg_listener_stopped",
@@ -159,65 +214,160 @@ class TelegramListener:
             )
 
     async def _on_new_message(self, event) -> None:
-        """Handle a new message from a whitelisted chat."""
-        message = event.message
-        chat_id = event.chat_id
-        category = self._categorize(chat_id)
+        """Handle a new message from a whitelisted chat.
 
-        if category is None:
-            return
-
-        self._router.reload_if_changed()
-
-        text = message.text or message.message or ""
-
-        sender = await event.get_sender()
-        sender_username = ""
-        sender_id = 0
-        if sender is not None:
-            sender_username = getattr(sender, "username", "") or ""
-            sender_id = getattr(sender, "id", 0) or 0
-
-        payload = {
-            "update_id": 0,
-            "message": {
-                "message_id": message.id,
-                "date": int(message.date.timestamp()) if message.date else 0,
-                "chat": {"id": chat_id, "type": "supergroup"},
-                "from": {"id": sender_id, "username": sender_username},
-                "text": text,
-            },
-        }
+        This method NEVER raises. All exceptions are caught, logged with
+        full context, and the listener continues processing future events.
+        """
+        # Extract basic identifiers safely for logging.
+        chat_id: Optional[int] = None
+        message_id: Optional[int] = None
 
         try:
-            result = write_telegram_capture(
-                payload=payload,
-                inbox_path=self._inbox_path,
-                phase_router=self._router,
-                bridge_version=_BRIDGE_VERSION,
-                watch_category=category,
-            )
-        except ValueError as exc:
-            self._log.warning(
-                "tg_listener_message_skipped",
+            chat_id = getattr(event, "chat_id", None)
+            message = getattr(event, "message", None)
+            message_id = getattr(message, "id", None) if message else None
+
+            # --- Entry log ---
+            # Extract text safely. Telethon Message has .text (str) and
+            # .raw_text. Avoid .message (deprecated alias in some versions).
+            raw_text = ""
+            if message is not None:
+                raw_text = getattr(message, "text", None) or ""
+                if not raw_text:
+                    raw_text = getattr(message, "raw_text", None) or ""
+
+            has_text = bool(raw_text)
+            text_length = len(raw_text)
+
+            # Determine if this chat is in our target set.
+            category = self._categorize(chat_id) if chat_id is not None else None
+            is_target = category is not None
+
+            self._log.info(
+                "tg_event_received",
                 extra={
                     "chat_id": chat_id,
-                    "message_id": message.id,
-                    "category": category,
-                    "reason": str(exc),
+                    "message_id": message_id,
+                    "has_text": has_text,
+                    "text_length": text_length,
+                    "is_target_chat": is_target,
+                    "watch_category": category,
                 },
             )
-            return
 
-        self._messages_processed += 1
-        self._log.info(
-            "tg_listener_capture_written",
-            extra={
-                "source": "telegram",
-                "category": category,
-                "phase": result["phase"],
-                "file": result["file"],
-                "chat_id": result["chat_id"],
-                "message_id": result["message_id"],
-            },
-        )
+            # --- Filter: not target chat ---
+            if not is_target:
+                self._log.info(
+                    "ignored_not_target_chat",
+                    extra={"chat_id": chat_id, "message_id": message_id},
+                )
+                return
+
+            # --- Filter: empty text ---
+            if not has_text:
+                self._log.info(
+                    "ignored_empty_text",
+                    extra={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "watch_category": category,
+                    },
+                )
+                return
+
+            # --- Hot-reload keywords ---
+            self._router.reload_if_changed()
+
+            # --- Build sender info safely ---
+            sender_username = ""
+            sender_id = 0
+            try:
+                sender = await event.get_sender()
+                if sender is not None:
+                    sender_username = getattr(sender, "username", "") or ""
+                    sender_id = getattr(sender, "id", 0) or 0
+            except Exception:
+                # Sender lookup can fail (deleted account, privacy, etc).
+                # Not critical; proceed with empty sender.
+                pass
+
+            # --- Build date safely ---
+            msg_date = getattr(message, "date", None)
+            date_ts = 0
+            if msg_date is not None:
+                try:
+                    date_ts = int(msg_date.timestamp())
+                except Exception:
+                    date_ts = 0
+
+            # --- Build payload ---
+            payload = {
+                "update_id": 0,
+                "message": {
+                    "message_id": message_id,
+                    "date": date_ts,
+                    "chat": {"id": chat_id, "type": "supergroup"},
+                    "from": {"id": sender_id, "username": sender_username},
+                    "text": raw_text,
+                },
+            }
+
+            # --- Write capture ---
+            try:
+                result = write_telegram_capture(
+                    payload=payload,
+                    inbox_path=self._inbox_path,
+                    phase_router=self._router,
+                    bridge_version=_BRIDGE_VERSION,
+                    watch_category=category,
+                )
+            except ValueError as exc:
+                self._log.warning(
+                    "ignored_writer_error",
+                    extra={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "watch_category": category,
+                        "reason": str(exc),
+                    },
+                )
+                return
+            except Exception as exc:
+                self._log.error(
+                    "ignored_writer_error",
+                    extra={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "watch_category": category,
+                        "exception_type": type(exc).__name__,
+                        "exception_message": str(exc),
+                    },
+                )
+                return
+
+            # --- Success ---
+            self._messages_processed += 1
+            self._log.info(
+                "tg_listener_capture_written",
+                extra={
+                    "source": "telegram",
+                    "category": category,
+                    "phase": result["phase"],
+                    "file": result["file"],
+                    "chat_id": result["chat_id"],
+                    "message_id": result["message_id"],
+                },
+            )
+
+        except Exception as exc:
+            # Outer catch-all: log full traceback but NEVER kill the listener.
+            self._log.error(
+                "tg_message_handler_error",
+                extra={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                },
+            )

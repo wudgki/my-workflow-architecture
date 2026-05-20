@@ -150,8 +150,9 @@ def create_app(
             "listener_connected": listener.connected,
             "messages_processed": listener.messages_processed,
         }
-        if listener.last_error:
-            result["last_error"] = listener.last_error
+        last_error = getattr(listener, "last_error", None)
+        if last_error:
+            result["last_error"] = last_error
         return result
 
     # Legacy webhook endpoint: only active if TELEGRAM_WEBHOOK_SECRET is set.

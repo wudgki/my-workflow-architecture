@@ -15,6 +15,7 @@ Matching rules (per SPEC-bridge-ingress.md sec. 4.1):
     if any `include` term hits, return that phase number.
   - If any `global_exclude` term hits, force phase=None regardless.
   - No match anywhere => phase=None (caller routes to To-Process).
+  - Return value is a string: "phase_1" .. "phase_4" or None.
 
 ASCII-only.
 """
@@ -103,8 +104,8 @@ class PhaseRouter:
             return True
         return False
 
-    def route(self, text: str) -> Optional[int]:
-        """Return phase 1..4 matching `text`, or None for no match."""
+    def route(self, text: str) -> Optional[str]:
+        """Return 'phase_1'..'phase_4' matching `text`, or None for no match."""
         if not text:
             return None
         haystack = text.lower()
@@ -114,5 +115,5 @@ class PhaseRouter:
             if any(term and term in haystack for term in phase.exclude):
                 continue
             if any(term and term in haystack for term in phase.include):
-                return phase.number
+                return "phase_" + str(phase.number)
         return None

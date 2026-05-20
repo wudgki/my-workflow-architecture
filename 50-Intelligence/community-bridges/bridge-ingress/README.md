@@ -68,7 +68,7 @@ chat_id: -100199988877
 message_id: 4242
 message_date: 2024-05-06T12:53:20+00:00      # Telegram message.date (UTC)
 from_username: alice                          # 可空
-phase: 3                                      # 1/2/3/4 或 null
+phase: phase_3                                # phase_1/phase_2/phase_3/phase_4 或 null
 tags: []
 status: raw                                   # 下游可改成 processed / promoted
 priority: p2

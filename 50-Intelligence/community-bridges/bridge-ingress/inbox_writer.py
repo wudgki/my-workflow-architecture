@@ -61,7 +61,7 @@ def write_telegram_capture(
     """Write one Telegram update to disk.
 
     Returns:
-        dict with keys: phase (int|None), file (absolute path),
+        dict with keys: phase (str|None, e.g. "phase_3"), file (absolute path),
         chat_id (int), message_id (int).
 
     Raises:

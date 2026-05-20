@@ -103,8 +103,12 @@ $elapsed = (Get-Date) - $startTime
 if ($exitCode -eq 0) {
     Write-Host "[OK] Sync completed in $([math]::Round($elapsed.TotalSeconds, 1))s"
 } elseif ($exitCode -eq 23) {
-    # Partial transfer (some files vanished during sync - normal for live inbox)
-    Write-Host "[WARN] Partial transfer (exit 23). Some files may have been processed/moved during sync. This is normal."
+    # Exit 23: Partial transfer due to error (some files could not be transferred)
+    Write-Host "[WARN] Partial transfer due to error (exit 23). Some files could not be transferred. This is usually non-fatal for a live inbox."
+} elseif ($exitCode -eq 24) {
+    # Exit 24: Partial transfer due to vanished source files (normal for live inbox
+    # where bridge-ingress may be writing new .tmp files that disappear before rsync finishes)
+    Write-Host "[WARN] Partial transfer due to vanished source files (exit 24). Files were created/removed during sync. This is normal."
 } else {
     Write-Error "rsync failed with exit code $exitCode"
     exit $exitCode

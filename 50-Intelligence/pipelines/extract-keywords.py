@@ -1,34 +1,40 @@
 #!/usr/bin/env python3
 """Extract candidate keywords from Telegram-Captures for keywords.yaml.
 
-Scans all .md captures, extracts message text, tokenizes, and outputs
-frequency-sorted candidate keyword lists grouped by watch_category.
-The output helps you decide which terms to add to keywords.yaml to
-reduce the null-phase ratio.
-
-Usage (Windows PowerShell):
-    python 50-Intelligence\\pipelines\\extract-keywords.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\
+Scans all .md captures, extracts message text, generates n-grams (1-4),
+and outputs frequency-sorted candidate keyword reports grouped by
+watch_category. Prioritizes candidates from null-phase captures.
 
 Usage (Linux/macOS):
-    python3 50-Intelligence/pipelines/extract-keywords.py /data/inbox/Telegram-Captures/
+    python3 extract-keywords.py /data/inbox/Telegram-Captures/
 
-Output:
-    - Top tokens by watch_category (meme / contract)
-    - Candidate crypto symbols (uppercase 2-6 char tokens)
-    - Candidate contract addresses (0x... patterns)
-    - Candidate Twitter/X handles (@username patterns)
-    - Tokens already covered by current keywords.yaml (for reference)
+Usage (Windows PowerShell):
+    py -3 extract-keywords.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\
+    py -3 extract-keywords.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\ --keywords 50-Intelligence\\pipelines\\keywords.yaml
+
+Options:
+    --keywords PATH    Path to existing keywords.yaml (marks existing terms)
+    --min-count N      Minimum frequency to include (default: 2)
+    --top-n N          Max candidates per category (default: 100)
+    --by-chat          Include per-chat_id breakdown
+    --output-dir DIR   Output directory (default: 50-Intelligence/pipelines/reports/)
+
+Output files:
+    <output-dir>/keyword-candidates.md   Human-readable report
+    <output-dir>/keyword-candidates.csv  Machine-readable table
 
 Requirements: pyyaml
-
 ASCII-only.
 """
 from __future__ import annotations
 
+import argparse
+import csv
 import os
 import re
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -39,9 +45,8 @@ import yaml
 _RE_CONTRACT_ADDR = re.compile(r'\b0x[a-fA-F0-9]{40}\b')
 _RE_TWITTER_HANDLE = re.compile(r'@[A-Za-z_][A-Za-z0-9_]{1,15}\b')
 _RE_CRYPTO_SYMBOL = re.compile(r'\b[A-Z]{2,6}\b')
-_RE_WORD = re.compile(r'[a-zA-Z0-9]{2,}')
+_RE_WORD = re.compile(r'[a-zA-Z0-9]+')
 
-# Common English stop words to filter out
 _STOP_WORDS = frozenset({
     'the', 'be', 'to', 'of', 'and', 'in', 'that', 'have', 'it',
     'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at',
@@ -57,24 +62,53 @@ _STOP_WORDS = frozenset({
     'give', 'day', 'most', 'us', 'is', 'are', 'was', 'were', 'been',
     'has', 'had', 'did', 'does', 'am', 'may', 'might', 'shall',
     'should', 'must', 'need', 'here', 'very', 'much', 'more', 'still',
-    'http', 'https', 'www', 'com', 'org', 'net', 'co',
+    'http', 'https', 'www', 'com', 'org', 'net', 'co', 'io',
+    'telegram', 'capture',
+})
+
+_SYMBOL_EXCLUDE = frozenset({
+    'THE', 'AND', 'FOR', 'NOT', 'ARE', 'BUT', 'ALL', 'CAN', 'HAS',
+    'HER', 'WAS', 'ONE', 'OUR', 'OUT', 'YOU', 'HAD', 'HIS', 'HOW',
+    'ITS', 'MAY', 'NEW', 'NOW', 'OLD', 'SEE', 'WAY', 'WHO', 'DID',
+    'GET', 'CMD', 'INFO', 'WARN',
 })
 
 
+@dataclass
+class CaptureRecord:
+    filename: str
+    chat_id: str
+    watch_category: str
+    phase: str
+    body: str
+
+
+@dataclass
+class Candidate:
+    text: str
+    candidate_type: str  # unigram, bigram, trigram, quadgram, symbol, address, handle
+    frequency: int = 0
+    document_frequency: int = 0
+    chat_ids: set = field(default_factory=set)
+    watch_categories: set = field(default_factory=set)
+    null_phase_count: int = 0
+    total_count: int = 0
+    example_filename: str = ""
+    existing: bool = False
+
+
+# --- Parsing ---
+
 def _parse_frontmatter(filepath: Path) -> Optional[dict[str, Any]]:
-    """Extract YAML front-matter from a Markdown file."""
     try:
         text = filepath.read_text(encoding="utf-8")
     except Exception:
         return None
-
     if not text.startswith("---\n"):
         return None
-
     end_idx = text.find("\n---\n", 4)
     if end_idx == -1:
         return None
-
     yaml_block = text[4:end_idx]
     try:
         data = yaml.safe_load(yaml_block)
@@ -86,34 +120,27 @@ def _parse_frontmatter(filepath: Path) -> Optional[dict[str, Any]]:
 
 
 def _extract_body(filepath: Path) -> str:
-    """Extract message body (after front-matter) from a capture file."""
     try:
         text = filepath.read_text(encoding="utf-8")
     except Exception:
         return ""
-
     if not text.startswith("---\n"):
         return text
-
     end_idx = text.find("\n---\n", 4)
     if end_idx == -1:
         return ""
-
     body = text[end_idx + 5:]
-    # Skip the "# Telegram capture" heading
     if body.startswith("# Telegram capture\n"):
         body = body[len("# Telegram capture\n"):]
     return body.strip()
 
 
 def _load_existing_keywords(keywords_path: str) -> set[str]:
-    """Load all existing keywords from keywords.yaml for comparison."""
     try:
         with open(keywords_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
     except Exception:
         return set()
-
     existing: set[str] = set()
     for key in data:
         if key.startswith("phase_") or key == "global_exclude":
@@ -129,150 +156,307 @@ def _load_existing_keywords(keywords_path: str) -> set[str]:
     return existing
 
 
-def generate_keyword_report(
+# --- N-gram extraction ---
+
+def _tokenize(text: str) -> list[str]:
+    """Tokenize text into lowercase words, filtering stop words."""
+    words = _RE_WORD.findall(text.lower())
+    return [w for w in words if w not in _STOP_WORDS and len(w) >= 2]
+
+
+def _extract_ngrams(tokens: list[str], n: int) -> list[str]:
+    """Extract n-grams from token list."""
+    if len(tokens) < n:
+        return []
+    return [" ".join(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+
+# --- Main logic ---
+
+def extract_candidates(
     captures_dir: str,
-    keywords_yaml_path: str = "",
-    top_n: int = 50,
-) -> str:
-    """Analyze captures and generate candidate keyword report."""
+    keywords_path: str = "",
+    min_count: int = 2,
+    top_n: int = 100,
+) -> list[Candidate]:
+    """Extract candidate keywords from captures directory."""
     captures_path = Path(captures_dir)
     if not captures_path.is_dir():
-        return f"ERROR: directory not found: {captures_dir}"
+        return []
 
     md_files = sorted(captures_path.glob("*.md"))
     if not md_files:
-        return f"No .md files found in {captures_dir}"
+        return []
 
-    # Load existing keywords for comparison
     existing_kw = set()
-    if keywords_yaml_path and os.path.exists(keywords_yaml_path):
-        existing_kw = _load_existing_keywords(keywords_yaml_path)
+    if keywords_path and os.path.exists(keywords_path):
+        existing_kw = _load_existing_keywords(keywords_path)
 
-    # Categorize captures and extract text
-    texts_by_category: dict[str, list[str]] = {
-        "meme": [],
-        "contract": [],
-        "null": [],
-    }
-
+    # Parse all captures
+    records: list[CaptureRecord] = []
     for f in md_files:
         fm = _parse_frontmatter(f)
         body = _extract_body(f)
         if not body:
             continue
+        chat_id = str(fm.get("chat_id", "unknown")) if fm else "unknown"
+        watch_cat = (fm.get("watch_category") or "null") if fm else "null"
+        phase = str(fm.get("phase") or "null") if fm else "null"
+        records.append(CaptureRecord(
+            filename=f.name,
+            chat_id=chat_id,
+            watch_category=watch_cat,
+            phase=phase,
+            body=body,
+        ))
 
-        cat = "null"
-        if fm:
-            cat = fm.get("watch_category") or "null"
+    # Accumulate candidates
+    candidate_map: dict[str, Candidate] = {}
 
-        texts_by_category.setdefault(cat, []).append(body)
+    for rec in records:
+        tokens = _tokenize(rec.body)
+        is_null_phase = rec.phase == "null" or rec.phase == "None"
 
-    # Token extraction per category
+        # Generate 1-4 grams
+        ngram_types = [
+            (1, "unigram"),
+            (2, "bigram"),
+            (3, "trigram"),
+            (4, "quadgram"),
+        ]
+
+        doc_seen: set[str] = set()
+
+        for n, ctype in ngram_types:
+            grams = _extract_ngrams(tokens, n)
+            for gram in grams:
+                if gram not in candidate_map:
+                    candidate_map[gram] = Candidate(
+                        text=gram,
+                        candidate_type=ctype,
+                    )
+                c = candidate_map[gram]
+                c.frequency += 1
+                c.total_count += 1
+                c.chat_ids.add(rec.chat_id)
+                c.watch_categories.add(rec.watch_category)
+                if is_null_phase:
+                    c.null_phase_count += 1
+                if not c.example_filename:
+                    c.example_filename = rec.filename
+                if gram not in doc_seen:
+                    c.document_frequency += 1
+                    doc_seen.add(gram)
+
+        # Crypto symbols
+        for sym in _RE_CRYPTO_SYMBOL.findall(rec.body):
+            if sym in _SYMBOL_EXCLUDE:
+                continue
+            key = sym.lower()
+            if key not in candidate_map:
+                candidate_map[key] = Candidate(
+                    text=sym, candidate_type="symbol",
+                )
+            c = candidate_map[key]
+            c.frequency += 1
+            c.total_count += 1
+            c.chat_ids.add(rec.chat_id)
+            c.watch_categories.add(rec.watch_category)
+            if is_null_phase:
+                c.null_phase_count += 1
+            if not c.example_filename:
+                c.example_filename = rec.filename
+            if key not in doc_seen:
+                c.document_frequency += 1
+                doc_seen.add(key)
+
+        # Contract addresses
+        for addr in _RE_CONTRACT_ADDR.findall(rec.body):
+            key = addr.lower()
+            if key not in candidate_map:
+                candidate_map[key] = Candidate(
+                    text=addr, candidate_type="address",
+                )
+            c = candidate_map[key]
+            c.frequency += 1
+            c.chat_ids.add(rec.chat_id)
+            c.watch_categories.add(rec.watch_category)
+            if is_null_phase:
+                c.null_phase_count += 1
+            if not c.example_filename:
+                c.example_filename = rec.filename
+            if key not in doc_seen:
+                c.document_frequency += 1
+                doc_seen.add(key)
+
+        # Twitter handles
+        for handle in _RE_TWITTER_HANDLE.findall(rec.body):
+            key = handle.lower()
+            if key not in candidate_map:
+                candidate_map[key] = Candidate(
+                    text=handle, candidate_type="handle",
+                )
+            c = candidate_map[key]
+            c.frequency += 1
+            c.chat_ids.add(rec.chat_id)
+            c.watch_categories.add(rec.watch_category)
+            if is_null_phase:
+                c.null_phase_count += 1
+            if not c.example_filename:
+                c.example_filename = rec.filename
+            if key not in doc_seen:
+                c.document_frequency += 1
+                doc_seen.add(key)
+
+    # Mark existing
+    for key, c in candidate_map.items():
+        if key in existing_kw or c.text.lower() in existing_kw:
+            c.existing = True
+
+    # Filter and sort: prioritize null-phase candidates, then by frequency
+    candidates = [c for c in candidate_map.values() if c.frequency >= min_count]
+    candidates.sort(key=lambda c: (-(c.null_phase_count / max(c.total_count, 1)), -c.frequency))
+
+    return candidates[:top_n * 5]  # return more, let caller slice per category
+
+
+# --- Output generation ---
+
+def _generate_csv(candidates: list[Candidate], output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "candidate", "candidate_type", "frequency",
+            "document_frequency", "chat_id_coverage",
+            "watch_category_coverage", "null_phase_ratio",
+            "example_filename", "existing",
+        ])
+        for c in candidates:
+            null_ratio = f"{c.null_phase_count / max(c.total_count, 1):.2f}"
+            writer.writerow([
+                c.text,
+                c.candidate_type,
+                c.frequency,
+                c.document_frequency,
+                len(c.chat_ids),
+                ",".join(sorted(c.watch_categories)),
+                null_ratio,
+                c.example_filename,
+                c.existing,
+            ])
+
+
+def _generate_markdown(candidates: list[Candidate], output_path: Path,
+                       captures_dir: str, top_n: int) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
-    lines.append("=" * 60)
-    lines.append("  Keyword Extraction Report")
-    lines.append("=" * 60)
+    lines.append("# Keyword Candidates Report")
     lines.append("")
-    lines.append(f"Captures scanned: {len(md_files)}")
-    lines.append(f"Existing keywords loaded: {len(existing_kw)}")
+    lines.append(f"Source: `{captures_dir}`")
+    lines.append(f"Total candidates (after min-count filter): {len(candidates)}")
+    lines.append("")
+    lines.append("Sorted by: null-phase ratio (desc), then frequency (desc)")
+    lines.append("")
+    lines.append("---")
     lines.append("")
 
-    for cat in ["meme", "contract", "null"]:
-        texts = texts_by_category.get(cat, [])
-        if not texts:
+    # Group by type
+    by_type: dict[str, list[Candidate]] = defaultdict(list)
+    for c in candidates:
+        by_type[c.candidate_type].append(c)
+
+    type_order = ["unigram", "bigram", "trigram", "quadgram",
+                  "symbol", "address", "handle"]
+
+    for ctype in type_order:
+        items = by_type.get(ctype, [])
+        if not items:
             continue
-
-        all_text = "\n".join(texts)
-        all_lower = all_text.lower()
-
-        # Word frequency (lowercased, stop words removed)
-        word_counter: Counter = Counter()
-        for word in _RE_WORD.findall(all_lower):
-            if word not in _STOP_WORDS and len(word) >= 3:
-                word_counter[word] += 1
-
-        # Crypto symbols (uppercase 2-6 chars)
-        symbol_counter: Counter = Counter()
-        for sym in _RE_CRYPTO_SYMBOL.findall(all_text):
-            if sym not in ("THE", "AND", "FOR", "NOT", "ARE", "BUT",
-                           "ALL", "CAN", "HAS", "HER", "WAS", "ONE",
-                           "OUR", "OUT", "YOU", "HAD", "HAS", "HIS",
-                           "HOW", "ITS", "MAY", "NEW", "NOW", "OLD",
-                           "SEE", "WAY", "WHO", "BOY", "DID", "GET"):
-                symbol_counter[sym] += 1
-
-        # Contract addresses
-        addresses = _RE_CONTRACT_ADDR.findall(all_text)
-        addr_counter: Counter = Counter(addresses)
-
-        # Twitter handles
-        handles = _RE_TWITTER_HANDLE.findall(all_text)
-        handle_counter: Counter = Counter(handles)
-
-        lines.append("-" * 60)
-        lines.append(f"  Category: {cat} ({len(texts)} messages)")
-        lines.append("-" * 60)
+        lines.append(f"## {ctype.title()} ({len(items)} candidates)")
+        lines.append("")
+        lines.append("| candidate | freq | doc_freq | chats | categories | null% | existing | example |")
+        lines.append("|---|---|---|---|---|---|---|---|")
+        for c in items[:top_n]:
+            null_pct = f"{c.null_phase_count * 100 / max(c.total_count, 1):.0f}%"
+            cats = ",".join(sorted(c.watch_categories))
+            existing_mark = "YES" if c.existing else ""
+            lines.append(
+                f"| {c.text} | {c.frequency} | {c.document_frequency} "
+                f"| {len(c.chat_ids)} | {cats} | {null_pct} "
+                f"| {existing_mark} | {c.example_filename} |"
+            )
         lines.append("")
 
-        # Top words
-        lines.append(f"  Top {top_n} tokens (frequency):")
-        for word, count in word_counter.most_common(top_n):
-            marker = " [EXISTING]" if word in existing_kw else ""
-            lines.append(f"    {word:<25} {count:>4}{marker}")
-        lines.append("")
-
-        # Top symbols
-        if symbol_counter:
-            lines.append(f"  Candidate crypto symbols (top 30):")
-            for sym, count in symbol_counter.most_common(30):
-                marker = " [EXISTING]" if sym.lower() in existing_kw else ""
-                lines.append(f"    {sym:<10} {count:>4}{marker}")
-            lines.append("")
-
-        # Contract addresses
-        if addr_counter:
-            lines.append(f"  Contract addresses (top 10):")
-            for addr, count in addr_counter.most_common(10):
-                lines.append(f"    {addr}  x{count}")
-            lines.append("")
-
-        # Twitter handles
-        if handle_counter:
-            lines.append(f"  Twitter/X handles (top 20):")
-            for handle, count in handle_counter.most_common(20):
-                lines.append(f"    {handle:<20} {count:>4}")
-            lines.append("")
-
-    lines.append("=" * 60)
+    lines.append("---")
     lines.append("")
-    lines.append("NEXT STEPS:")
-    lines.append("  1. Review the token lists above")
-    lines.append("  2. Pick terms that represent real signals (not noise)")
-    lines.append("  3. Add them to 50-Intelligence/pipelines/keywords.yaml:")
-    lines.append("     - Meme signals -> phase_3 include (or new phase_5)")
-    lines.append("     - Contract signals -> phase_3 include")
-    lines.append("     - Noise/spam terms -> global_exclude")
-    lines.append("  4. Re-run inbox-stats.py to verify null ratio decreased")
+    lines.append("## Next Steps")
     lines.append("")
-    return "\n".join(lines)
+    lines.append("1. Review candidates with high null-phase ratio (these are signals currently unrouted)")
+    lines.append("2. Pick terms that represent real trading/meme signals")
+    lines.append("3. Add to keywords.yaml (phase_3 for contract, phase_5 for meme, or global_exclude for noise)")
+    lines.append("4. Re-run inbox-stats.py to verify null ratio decreased")
+    lines.append("")
 
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+# --- CLI ---
 
 def main() -> None:
-    if len(sys.argv) < 2:
-        print("Usage:")
-        print("  python extract-keywords.py <captures-directory> [keywords.yaml]")
-        print("")
-        print("Examples:")
-        print("  python extract-keywords.py /data/inbox/Telegram-Captures/")
-        print("  python extract-keywords.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\ 50-Intelligence\\pipelines\\keywords.yaml")
-        print("  py -3 extract-keywords.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\")
+    parser = argparse.ArgumentParser(
+        description="Extract candidate keywords from Telegram-Captures",
+    )
+    parser.add_argument("captures_dir", help="Path to Telegram-Captures directory")
+    parser.add_argument("--keywords", default="", help="Path to existing keywords.yaml")
+    parser.add_argument("--min-count", type=int, default=2, help="Min frequency (default: 2)")
+    parser.add_argument("--top-n", type=int, default=100, help="Max candidates per type (default: 100)")
+    parser.add_argument("--by-chat", action="store_true", help="Include per-chat breakdown")
+    parser.add_argument("--output-dir", default="", help="Output directory for reports")
+
+    args = parser.parse_args()
+
+    captures_dir = args.captures_dir
+    if not Path(captures_dir).is_dir():
+        print(f"ERROR: directory not found: {captures_dir}")
         sys.exit(1)
 
-    captures_dir = sys.argv[1]
-    keywords_path = sys.argv[2] if len(sys.argv) >= 3 else ""
+    # Determine output dir
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        # Default: 50-Intelligence/pipelines/reports/ relative to script
+        script_dir = Path(__file__).resolve().parent
+        output_dir = script_dir / "reports"
 
-    report = generate_keyword_report(captures_dir, keywords_path)
-    print(report)
+    candidates = extract_candidates(
+        captures_dir=captures_dir,
+        keywords_path=args.keywords,
+        min_count=args.min_count,
+        top_n=args.top_n,
+    )
+
+    if not candidates:
+        print("No candidates found (empty directory or all below min-count).")
+        sys.exit(0)
+
+    # Generate outputs
+    csv_path = output_dir / "keyword-candidates.csv"
+    md_path = output_dir / "keyword-candidates.md"
+
+    _generate_csv(candidates, csv_path)
+    _generate_markdown(candidates, md_path, captures_dir, args.top_n)
+
+    # Also print summary to stdout
+    print(f"Extracted {len(candidates)} candidates")
+    print(f"  CSV: {csv_path}")
+    print(f"  MD:  {md_path}")
+    print("")
+    print("Top 20 candidates (by null-phase priority):")
+    for c in candidates[:20]:
+        null_pct = f"{c.null_phase_count * 100 / max(c.total_count, 1):.0f}%"
+        mark = " [EXISTING]" if c.existing else ""
+        print(f"  {c.text:<30} freq={c.frequency:<4} null={null_pct:<5} type={c.candidate_type}{mark}")
 
 
 if __name__ == "__main__":

@@ -127,29 +127,56 @@ ssh-keygen -t ed25519 -f $HOME\.ssh\hermes-rsync-key -C "hermes-rsync-readonly"
 
 ---
 
-## 步骤 2：部署公钥到 VPS（限制权限）
+## 步骤 2：部署 guard 脚本 + 公钥到 VPS
 
-把 `.pub` 内容复制到 VPS 的 `/root/.ssh/authorized_keys`（或对应用户），
-加上 `restrict` + `command` 限制：
+### 2a. 部署 rsync guard 脚本
+
+将 `90-Ops/scripts/rsync-captures-guard.sh` 复制到 VPS：
 
 ```bash
 # 在 VPS 上执行
+scp rsync-captures-guard.sh root@<VPS_IP>:/root/.ssh/rsync-captures-guard.sh
+# 或直接在 VPS 上：
+nano /root/.ssh/rsync-captures-guard.sh
+# 粘贴 90-Ops/scripts/rsync-captures-guard.sh 的内容
+
+chmod 700 /root/.ssh/rsync-captures-guard.sh
+```
+
+guard 脚本的作用：
+
+- 读取 `SSH_ORIGINAL_COMMAND`（rsync 客户端自动发送的服务端命令）
+- 验证必须以 `rsync --server --sender` 开头（只允许读取）
+- 验证最终路径必须是 `/data/inbox/Telegram-Captures/`
+- 拒绝任何含 shell 元字符的命令（防注入）
+- 通过验证后 exec 执行原始命令（不经 eval）
+- 日志写入 `/tmp/hermes-rsync-original-command.log`（仅命令+时间戳，无 secret）
+
+为什么不用静态 `command="rsync --server --sender -logDtprze..."`：
+
+- rsync 客户端发送的 `--server` 标志会随版本变化（3.2 vs 3.3 不同）
+- `--dry-run`、`--progress`、压缩选项都会改变 flag 字符串
+- 静态匹配会导致 DryRun 或跨版本场景下连接被拒绝
+
+### 2b. 配置 authorized_keys
+
+```bash
 nano ~/.ssh/authorized_keys
 ```
 
 添加一行（用你的 .pub 内容替换 `ssh-ed25519 AAAA...`）：
 
 ```
-restrict,command="rsync --server --sender -logDtprze.iLsfxCIvu . /data/inbox/Telegram-Captures/" ssh-ed25519 AAAA... hermes-rsync-readonly
+restrict,command="/root/.ssh/rsync-captures-guard.sh" ssh-ed25519 AAAA... hermes-rsync-readonly
 ```
 
 **说明**：
 
 - `restrict`：禁止 port forwarding / agent forwarding / pty / X11
-- `command="rsync --server --sender ..."`: 只允许 rsync 读取操作
-- `--sender`：VPS 侧只做发送（不接收写入）
-- 路径限死 `/data/inbox/Telegram-Captures/`
-- 即使私钥泄露，攻击者只能读这一个目录，不能执行任何命令
+- `command="...guard.sh"`：所有 SSH 请求都先经过 guard 脚本验证
+- guard 脚本只放行 `rsync --server --sender ... /data/inbox/Telegram-Captures/`
+- 即使私钥泄露，攻击者只能 rsync 读取这一个目录，不能执行任何命令
+- 兼容所有 rsync 版本和 flag 组合（--dry-run、--progress 等）
 
 ---
 

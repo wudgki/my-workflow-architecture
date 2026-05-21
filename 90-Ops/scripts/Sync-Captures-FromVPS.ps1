@@ -131,7 +131,13 @@ Or specify -RsyncPath explicitly:
 
 # --- Path conversion for MSYS rsync ---
 # MSYS/Git rsync does not understand Windows paths like D:\foo\bar.
-# Convert to /d/foo/bar format.
+# Convert to /d/foo/bar format for rsync's own arguments (local dest).
+#
+# IMPORTANT: The SSH -i key path must NOT use /c/Users/... format because
+# when MSYS2_ARG_CONV_EXCL=* is set, MSYS2 will not convert it back to a
+# Windows path that ssh.exe can open. Instead we use C:/Users/... format
+# (Windows path with forward slashes) which both MSYS ssh and native ssh
+# understand regardless of MSYS2_ARG_CONV_EXCL setting.
 
 function ConvertTo-MsysPath {
     param([string]$WinPath)
@@ -147,12 +153,24 @@ function ConvertTo-MsysPath {
     return $resolved -replace '\\', '/'
 }
 
+function ConvertTo-ForwardSlashPath {
+    param([string]$WinPath)
+    # Resolve to absolute then just replace backslashes with forward slashes.
+    # Result: C:/Users/Administrator/.ssh/hermes-rsync-key
+    # This format is understood by both MSYS ssh and native Windows ssh.
+    $resolved = [System.IO.Path]::GetFullPath($WinPath)
+    return $resolved -replace '\\', '/'
+}
+
 $RsyncLocalPath = $LocalPath
 $RsyncSshKeyPath = $SshKeyPath
 
 if ($IsMsysRsync) {
+    # Local destination path: use MSYS format (/d/...) for rsync
     $RsyncLocalPath = ConvertTo-MsysPath $LocalPath
-    $RsyncSshKeyPath = ConvertTo-MsysPath $SshKeyPath
+    # SSH key path: use Windows-with-forward-slashes (C:/...) for ssh -i
+    # This works with MSYS2_ARG_CONV_EXCL=* because ssh sees a real Windows path.
+    $RsyncSshKeyPath = ConvertTo-ForwardSlashPath $SshKeyPath
     Write-Host "[INFO] MSYS rsync detected; converted paths:"
     Write-Host "       LocalPath -> $RsyncLocalPath"
     Write-Host "       SshKeyPath -> $RsyncSshKeyPath"

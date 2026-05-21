@@ -127,6 +127,10 @@ def create_app(
                 await listener.start()
                 if listener.connected:
                     await listener.run_until_disconnected()
+                    # If still connected after return, this was a clean
+                    # shutdown (e.g. stop() called) — do not reconnect.
+                    if listener.connected:
+                        return
                 # If we get here, listener disconnected (or failed to start).
                 if attempt < max_retries:
                     log.warning(

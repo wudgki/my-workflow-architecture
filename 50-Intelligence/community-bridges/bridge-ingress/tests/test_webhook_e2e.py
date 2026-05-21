@@ -19,6 +19,8 @@ _RELOAD_TARGETS = (
 
 
 class _FakeListener:
+    """Stub listener that never blocks. Simulates a stable connection."""
+
     def __init__(self, **kwargs: object) -> None:
         self._connected = False
         self._messages_processed = 0
@@ -36,10 +38,10 @@ class _FakeListener:
         self._connected = True
 
     async def run_until_disconnected(self) -> None:
-        try:
-            await asyncio.sleep(3600)
-        except asyncio.CancelledError:
-            pass
+        # Returns immediately. Since connected stays True, the lifespan
+        # reconnect loop treats this as a clean return (not a disconnect)
+        # and does not retry. Tests complete without blocking.
+        return
 
     async def stop(self) -> None:
         self._connected = False

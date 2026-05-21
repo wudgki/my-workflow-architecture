@@ -194,19 +194,21 @@ class TelegramListener:
         """Block until the client disconnects (e.g. on SIGTERM).
 
         If the client was never connected (start failed), this returns
-        immediately without raising.
+        immediately without raising. After return, connected is always False
+        to allow reconnect attempts by the caller.
         """
         if self._client is None or not self._connected:
             return
         try:
             await self._client.run_until_disconnected()
         except Exception as exc:
-            self._connected = False
             self._last_error = "disconnected: " + str(exc)
             self._log.warning(
                 "tg_listener_disconnected_unexpectedly",
                 extra={"reason": self._last_error},
             )
+        finally:
+            self._connected = False
 
     async def stop(self) -> None:
         """Gracefully disconnect from Telegram."""

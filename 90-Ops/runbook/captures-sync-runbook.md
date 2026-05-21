@@ -259,6 +259,7 @@ crontab -e
 |---|---|---|
 | `Permission denied (publickey)` | 公钥没部署 / 路径错 | 核对 VPS authorized_keys |
 | `rsync: connection unexpectedly closed` | VPS 重启 / 网络断 | 重试；检查 VPS 是否在线 |
+| guard 日志显示 `C:/msys64/data/...` | MSYS2 参数转换仍在生效 | 确认脚本版本含 `MSYS2_ARG_CONV_EXCL=*`；重新 git pull |
 | `rsync error: some files vanished` (exit 24) | 文件在传输中被移走 | 正常现象（bridge 在写新 .tmp 文件然后 rename）；脚本视为 WARN 不报错 |
 | `rsync: partial transfer` (exit 23) | 部分文件因错误无法传输 | 通常非致命；脚本视为 WARN；下次 sync 会补齐 |
 | 同步后 Syncthing 未分发到副电脑 | Syncthing 暂停 / Receive Only 冲突 | 检查 Syncthing Web UI |

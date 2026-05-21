@@ -189,9 +189,25 @@ Write-Host "[INFO] Syncing: ${VpsHost}:${RemotePath} -> ${LocalPath}"
 Write-Host "[INFO] rsync: $ResolvedRsync"
 Write-Host "[INFO] SSH key: $SshKeyPath"
 
+# MSYS2 auto-converts arguments that look like Unix paths (starting with /).
+# This mangles the remote path (e.g. /data/inbox/... becomes C:/msys64/data/...).
+# Setting MSYS2_ARG_CONV_EXCL="*" disables all argument conversion for the
+# rsync call. We already pre-converted LocalPath and SshKeyPath to MSYS format
+# above, so blanket exclusion is safe and prevents remote path corruption.
+$savedMsys2ArgConvExcl = $env:MSYS2_ARG_CONV_EXCL
+
 $startTime = Get-Date
-& $ResolvedRsync @rsyncArgs
-$exitCode = $LASTEXITCODE
+try {
+    if ($IsMsysRsync) {
+        $env:MSYS2_ARG_CONV_EXCL = '*'
+        Write-Host "[INFO] Set MSYS2_ARG_CONV_EXCL=* for rsync invocation"
+    }
+    & $ResolvedRsync @rsyncArgs
+    $exitCode = $LASTEXITCODE
+} finally {
+    # Restore previous value (may be $null if was not set).
+    $env:MSYS2_ARG_CONV_EXCL = $savedMsys2ArgConvExcl
+}
 $elapsed = (Get-Date) - $startTime
 
 if ($exitCode -eq 0) {

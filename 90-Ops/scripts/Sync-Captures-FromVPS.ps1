@@ -244,5 +244,5 @@ if ($exitCode -eq 0) {
 }
 
 # --- Summary ---
-$fileCount = (Get-ChildItem -Path $LocalPath -Filter '*.md' -File -ErrorAction SilentlyContinue).Count
+$fileCount = @(Get-ChildItem -Path $LocalPath -Filter '*.md' -File -ErrorAction SilentlyContinue).Count
 Write-Host "[INFO] Local captures count: $fileCount files"

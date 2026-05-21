@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Callable, Optional, Protocol, Tuple
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from config import Settings, load_settings
 from inbox_writer import write_telegram_capture
@@ -116,13 +117,32 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-        # Start listener as a background task. Do NOT await it here so
-        # FastAPI startup completes immediately regardless of Telegram
-        # connection outcome.
+        # Start listener as a background task with auto-reconnect.
+        # If the connection drops, retry every 60s up to 10 times.
+        # FastAPI startup completes immediately regardless of outcome.
         async def _listener_lifecycle() -> None:
-            await listener.start()
-            if listener.connected:
-                await listener.run_until_disconnected()
+            max_retries = 10
+            retry_delay = 60  # seconds
+            for attempt in range(max_retries + 1):
+                await listener.start()
+                if listener.connected:
+                    await listener.run_until_disconnected()
+                # If we get here, listener disconnected (or failed to start).
+                if attempt < max_retries:
+                    log.warning(
+                        "listener_reconnect_scheduled",
+                        extra={
+                            "attempt": attempt + 1,
+                            "max_retries": max_retries,
+                            "retry_in_seconds": retry_delay,
+                        },
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    log.error(
+                        "listener_reconnect_exhausted",
+                        extra={"max_retries": max_retries},
+                    )
 
         listener_task = asyncio.create_task(_listener_lifecycle())
         yield
@@ -144,16 +164,20 @@ def create_app(
     )
 
     @app.get("/healthz")
-    def healthz() -> dict:
-        result: dict = {
-            "status": "ok",
+    def healthz() -> Response:
+        body: dict = {
             "listener_connected": listener.connected,
             "messages_processed": listener.messages_processed,
         }
         last_error = getattr(listener, "last_error", None)
         if last_error:
-            result["last_error"] = last_error
-        return result
+            body["last_error"] = last_error
+        if listener.connected:
+            body["status"] = "ok"
+            return JSONResponse(content=body, status_code=200)
+        else:
+            body["status"] = "degraded"
+            return JSONResponse(content=body, status_code=503)
 
     # Legacy webhook endpoint: only active if TELEGRAM_WEBHOOK_SECRET is set.
     if settings.telegram_webhook_secret:

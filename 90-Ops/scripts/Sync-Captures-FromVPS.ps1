@@ -12,6 +12,17 @@
     After sync, Syncthing handles distribution to secondary machines
     via the existing AI-Workspace - Inbox share.
 
+    rsync resolution order:
+      1. -RsyncPath parameter (explicit override)
+      2. Get-Command rsync (already in PATH)
+      3. Git for Windows bundled rsync (C:\Program Files\Git\usr\bin\rsync.exe)
+      4. Fail with actionable error message
+
+    Path format:
+      Git/MSYS rsync requires MSYS-style paths (/d/... instead of D:\...).
+      This script auto-converts Windows paths to MSYS format when using
+      Git/MSYS rsync.
+
 .PARAMETER VpsHost
     SSH host for the VPS (e.g. user@1.2.3.4 or a ~/.ssh/config alias).
 
@@ -27,19 +38,23 @@
 .PARAMETER SshKeyPath
     Path to the SSH private key (default: ~/.ssh/hermes-rsync-key).
 
+.PARAMETER RsyncPath
+    Explicit path to rsync executable (optional). Overrides auto-detection.
+
 .EXAMPLE
     .\Sync-Captures-FromVPS.ps1 -VpsHost hermes-vps
     .\Sync-Captures-FromVPS.ps1 -VpsHost root@1.2.3.4 -DryRun
+    .\Sync-Captures-FromVPS.ps1 -VpsHost root@1.2.3.4 -RsyncPath "C:\tools\rsync.exe"
 
 .NOTES
     Requirements:
-      - rsync installed (WSL, Git Bash, or native Windows rsync)
+      - rsync available (Git for Windows, WSL, scoop, or cwrsync)
       - SSH key pair generated and deployed (see captures-sync-runbook.md)
       - VPS authorized_keys configured with restrict + command limit
 
     Security:
       - Never logs SSH key content or passphrase
-      - Never writes to VPS (--whole-file avoids delta protocol)
+      - Never writes to VPS (read-only pull)
       - Preserves file timestamps for idempotent downstream processing
 #>
 
@@ -54,18 +69,96 @@ param(
 
     [string]$SshKeyPath = "$HOME\.ssh\hermes-rsync-key",
 
+    [string]$RsyncPath = '',
+
     [switch]$DryRun
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# --- Validation ---
-if (-not (Get-Command rsync -ErrorAction SilentlyContinue)) {
-    Write-Error "rsync not found. Install via WSL, Git Bash, or scoop install rsync."
+# --- rsync resolution ---
+# Determines the path to the rsync executable and whether it is MSYS-based
+# (which requires path format conversion).
+
+$IsMsysRsync = $false
+$ResolvedRsync = ''
+
+if ($RsyncPath) {
+    # 1. Explicit parameter
+    if (-not (Test-Path $RsyncPath)) {
+        Write-Error "Specified -RsyncPath not found: $RsyncPath"
+        exit 1
+    }
+    $ResolvedRsync = $RsyncPath
+    # Detect if this is an MSYS/Git rsync by checking the path
+    if ($RsyncPath -match 'Git\\usr\\bin|msys|mingw') {
+        $IsMsysRsync = $true
+    }
+} elseif (Get-Command rsync -ErrorAction SilentlyContinue) {
+    # 2. Already in PATH
+    $ResolvedRsync = (Get-Command rsync).Source
+    if ($ResolvedRsync -match 'Git\\usr\\bin|msys|mingw') {
+        $IsMsysRsync = $true
+    }
+} elseif (Test-Path 'C:\Program Files\Git\usr\bin\rsync.exe') {
+    # 3. Git for Windows bundled rsync
+    $ResolvedRsync = 'C:\Program Files\Git\usr\bin\rsync.exe'
+    $IsMsysRsync = $true
+    Write-Host "[INFO] Using Git for Windows bundled rsync: $ResolvedRsync"
+} else {
+    # 4. Not found anywhere
+    Write-Error @"
+rsync not found. Install one of the following:
+
+  Option A (recommended): Git for Windows (includes rsync at C:\Program Files\Git\usr\bin\rsync.exe)
+    https://git-scm.com/download/win
+
+  Option B: scoop install rsync
+    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+    Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+    scoop install rsync
+
+  Option C: WSL (use 'wsl rsync ...' directly)
+
+  Option D: cwrsync (https://itefix.net/cwrsync)
+
+Or specify -RsyncPath explicitly:
+    .\Sync-Captures-FromVPS.ps1 -VpsHost <host> -RsyncPath "C:\path\to\rsync.exe"
+"@
     exit 1
 }
 
+# --- Path conversion for MSYS rsync ---
+# MSYS/Git rsync does not understand Windows paths like D:\foo\bar.
+# Convert to /d/foo/bar format.
+
+function ConvertTo-MsysPath {
+    param([string]$WinPath)
+    # Resolve to absolute path first
+    $resolved = [System.IO.Path]::GetFullPath($WinPath)
+    # D:\foo\bar -> /d/foo/bar
+    if ($resolved -match '^([A-Za-z]):\\(.*)$') {
+        $drive = $Matches[1].ToLower()
+        $rest = $Matches[2] -replace '\\', '/'
+        return "/$drive/$rest"
+    }
+    # Already unix-style or UNC, return as-is
+    return $resolved -replace '\\', '/'
+}
+
+$RsyncLocalPath = $LocalPath
+$RsyncSshKeyPath = $SshKeyPath
+
+if ($IsMsysRsync) {
+    $RsyncLocalPath = ConvertTo-MsysPath $LocalPath
+    $RsyncSshKeyPath = ConvertTo-MsysPath $SshKeyPath
+    Write-Host "[INFO] MSYS rsync detected; converted paths:"
+    Write-Host "       LocalPath -> $RsyncLocalPath"
+    Write-Host "       SshKeyPath -> $RsyncSshKeyPath"
+}
+
+# --- Validation ---
 if (-not (Test-Path $SshKeyPath)) {
     Write-Error "SSH key not found at $SshKeyPath. See captures-sync-runbook.md."
     exit 1
@@ -81,9 +174,9 @@ $rsyncArgs = @(
     '-avz'
     '--progress'
     '--timeout=30'
-    '-e', "ssh -i `"$SshKeyPath`" -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+    '-e', "ssh -i `"$RsyncSshKeyPath`" -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
     "${VpsHost}:${RemotePath}"
-    $LocalPath
+    $RsyncLocalPath
 )
 
 if ($DryRun) {
@@ -93,10 +186,11 @@ if ($DryRun) {
 
 # --- Execute ---
 Write-Host "[INFO] Syncing: ${VpsHost}:${RemotePath} -> ${LocalPath}"
+Write-Host "[INFO] rsync: $ResolvedRsync"
 Write-Host "[INFO] SSH key: $SshKeyPath"
 
 $startTime = Get-Date
-& rsync @rsyncArgs
+& $ResolvedRsync @rsyncArgs
 $exitCode = $LASTEXITCODE
 $elapsed = (Get-Date) - $startTime
 

@@ -25,6 +25,7 @@ _SPEC = importlib.util.spec_from_file_location(
     "inbox_stats", str(_PIPELINES_DIR / "inbox-stats.py")
 )
 _MOD = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _MOD
 _SPEC.loader.exec_module(_MOD)
 
 _parse_frontmatter = _MOD._parse_frontmatter

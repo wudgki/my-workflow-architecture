@@ -22,6 +22,7 @@ _SPEC = importlib.util.spec_from_file_location(
     "extract_keywords", str(_SCRIPT_PATH)
 )
 _MOD = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _MOD
 _SPEC.loader.exec_module(_MOD)
 
 extract_candidates = _MOD.extract_candidates

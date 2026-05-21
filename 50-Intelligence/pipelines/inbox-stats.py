@@ -10,9 +10,12 @@ and prints a summary report including:
   - Hourly distribution (last 24h)
   - Null-phase ratio (indicator for keywords.yaml coverage)
 
-Usage:
-    python inbox-stats.py /data/inbox/Telegram-Captures/
-    python inbox-stats.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\
+Usage (Linux/macOS):
+    python3 inbox-stats.py /data/inbox/Telegram-Captures/
+
+Usage (Windows PowerShell):
+    python 50-Intelligence\\pipelines\\inbox-stats.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\
+    py -3 50-Intelligence\\pipelines\\inbox-stats.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\
 
 Requirements: pyyaml (same as bridge-ingress)
 
@@ -187,10 +190,13 @@ def generate_report(captures_dir: str) -> str:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        print("Usage: python inbox-stats.py <captures-directory>")
+        print("Usage:")
+        print("  python inbox-stats.py <captures-directory>")
         print("")
-        print("Example:")
+        print("Examples:")
         print("  python inbox-stats.py /data/inbox/Telegram-Captures/")
+        print("  python inbox-stats.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\")
+        print("  py -3 inbox-stats.py D:\\AI-Workspace\\00-Inbox\\Telegram-Captures\\")
         sys.exit(1)
 
     captures_dir = sys.argv[1]

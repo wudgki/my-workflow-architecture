@@ -181,3 +181,53 @@ def test_report_parse_errors_noted(tmp_path: Path) -> None:
     report = generate_report(str(tmp_path))
     assert "Total captures: 1" in report
     assert "Parse errors" in report
+
+
+
+# --------------------------------------------------------------------- #
+# Tests: CLI subprocess invocation
+# --------------------------------------------------------------------- #
+
+import subprocess
+
+
+_SCRIPT_PATH = _PIPELINES_DIR / "inbox-stats.py"
+
+
+def test_cli_with_valid_captures(tmp_path: Path) -> None:
+    """Run inbox-stats.py as a subprocess with sys.executable."""
+    _write_capture(tmp_path, "cli_test.md", phase="phase_3",
+                   watch_category="meme", chat_id=-100111)
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT_PATH), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    assert "Total captures: 1" in result.stdout
+    assert "phase_3" in result.stdout
+
+
+def test_cli_with_empty_dir(tmp_path: Path) -> None:
+    """Empty dir should produce 'No .md files' and exit 0."""
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT_PATH), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    assert "No .md files" in result.stdout
+
+
+def test_cli_no_args_shows_usage() -> None:
+    """No arguments should show usage and exit 1."""
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT_PATH)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 1
+    assert "Usage" in result.stdout or "usage" in result.stdout.lower()

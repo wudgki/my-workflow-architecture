@@ -217,42 +217,15 @@ def extract_candidates(
         tokens = _tokenize(rec.body)
         is_null_phase = rec.phase == "null" or rec.phase == "None"
 
-        # Generate 1-4 grams
-        ngram_types = [
-            (1, "unigram"),
-            (2, "bigram"),
-            (3, "trigram"),
-            (4, "quadgram"),
-        ]
-
         doc_seen: set[str] = set()
 
-        for n, ctype in ngram_types:
-            grams = _extract_ngrams(tokens, n)
-            for gram in grams:
-                if gram not in candidate_map:
-                    candidate_map[gram] = Candidate(
-                        text=gram,
-                        candidate_type=ctype,
-                    )
-                c = candidate_map[gram]
-                c.frequency += 1
-                c.total_count += 1
-                c.chat_ids.add(rec.chat_id)
-                c.watch_categories.add(rec.watch_category)
-                if is_null_phase:
-                    c.null_phase_count += 1
-                if not c.example_filename:
-                    c.example_filename = rec.filename
-                if gram not in doc_seen:
-                    c.document_frequency += 1
-                    doc_seen.add(gram)
-
-        # Crypto symbols
+        # --- Crypto symbols FIRST (preserves uppercase canonical form) ---
+        # Use "symbol:" prefix in the key to avoid collision with
+        # lowercase n-gram keys (e.g. "sol" unigram vs "SOL" symbol).
         for sym in _RE_CRYPTO_SYMBOL.findall(rec.body):
             if sym in _SYMBOL_EXCLUDE:
                 continue
-            key = sym.lower()
+            key = "symbol:" + sym
             if key not in candidate_map:
                 candidate_map[key] = Candidate(
                     text=sym, candidate_type="symbol",
@@ -270,9 +243,39 @@ def extract_candidates(
                 c.document_frequency += 1
                 doc_seen.add(key)
 
+        # --- N-grams (lowercase) ---
+        ngram_types = [
+            (1, "unigram"),
+            (2, "bigram"),
+            (3, "trigram"),
+            (4, "quadgram"),
+        ]
+
+        for n, ctype in ngram_types:
+            grams = _extract_ngrams(tokens, n)
+            for gram in grams:
+                key = "ngram:" + gram
+                if key not in candidate_map:
+                    candidate_map[key] = Candidate(
+                        text=gram,
+                        candidate_type=ctype,
+                    )
+                c = candidate_map[key]
+                c.frequency += 1
+                c.total_count += 1
+                c.chat_ids.add(rec.chat_id)
+                c.watch_categories.add(rec.watch_category)
+                if is_null_phase:
+                    c.null_phase_count += 1
+                if not c.example_filename:
+                    c.example_filename = rec.filename
+                if key not in doc_seen:
+                    c.document_frequency += 1
+                    doc_seen.add(key)
+
         # Contract addresses
         for addr in _RE_CONTRACT_ADDR.findall(rec.body):
-            key = addr.lower()
+            key = "addr:" + addr.lower()
             if key not in candidate_map:
                 candidate_map[key] = Candidate(
                     text=addr, candidate_type="address",
@@ -291,7 +294,7 @@ def extract_candidates(
 
         # Twitter handles
         for handle in _RE_TWITTER_HANDLE.findall(rec.body):
-            key = handle.lower()
+            key = "handle:" + handle.lower()
             if key not in candidate_map:
                 candidate_map[key] = Candidate(
                     text=handle, candidate_type="handle",
@@ -310,7 +313,7 @@ def extract_candidates(
 
     # Mark existing
     for key, c in candidate_map.items():
-        if key in existing_kw or c.text.lower() in existing_kw:
+        if c.text.lower() in existing_kw:
             c.existing = True
 
     # Filter and sort: prioritize null-phase candidates, then by frequency

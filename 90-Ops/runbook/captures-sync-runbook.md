@@ -36,7 +36,34 @@ VPS /data/inbox/Telegram-Captures/
 
 Windows 原生不自带 rsync，推荐以下方案（按优先级排列）：
 
-### 方案 A：Git for Windows 自带的 rsync（推荐）
+### 方案 A：MSYS2 rsync + openssh（推荐）
+
+如果你已安装 MSYS2（`C:\msys64`），在 MSYS2 终端中：
+
+```bash
+pacman -S rsync openssh
+```
+
+验证：
+
+```powershell
+& "C:\msys64\usr\bin\rsync.exe" --version
+& "C:\msys64\usr\bin\ssh.exe" -V
+```
+
+> ⚠️ **必须同时安装 rsync 和 openssh**。MSYS2 rsync 需要搭配 MSYS2 ssh
+> 才能正常工作。如果搭配 Windows 自带的 `C:\Windows\System32\OpenSSH\ssh.exe`
+> 会导致 `rsync protocol data stream error (code 12)`。
+
+使用时指定 `-RsyncPath`：
+
+```powershell
+.\Sync-Captures-FromVPS.ps1 -VpsHost root@<VPS_IP> -RsyncPath "C:\msys64\usr\bin\rsync.exe"
+```
+
+脚本会自动检测到 MSYS rsync 并使用 `C:\msys64\usr\bin\ssh.exe`。
+
+### 方案 B：Git for Windows 自带的 rsync
 
 如果你已安装 Git for Windows（大概率已有），它自带 MSYS2 环境中的 rsync。
 
@@ -258,9 +285,10 @@ crontab -e
 | 现象 | 可能原因 | 处置 |
 |---|---|---|
 | `Permission denied (publickey)` | 公钥没部署 / 路径错 | 核对 VPS authorized_keys |
+| `rsync: connection unexpectedly closed` (code 12) | MSYS rsync 搭配 Win32 OpenSSH | 安装 MSYS2 openssh: `pacman -S openssh`；或用 `-SshPath` 指定 |
 | `rsync: connection unexpectedly closed` | VPS 重启 / 网络断 | 重试；检查 VPS 是否在线 |
 | guard 日志显示 `C:/msys64/data/...` | MSYS2 参数转换仍在生效 | 确认脚本版本含 `MSYS2_ARG_CONV_EXCL=*`；重新 git pull |
-| `rsync error: some files vanished` (exit 24) | 文件在传输中被移走 | 正常现象（bridge 在写新 .tmp 文件然后 rename）；脚本视为 WARN 不报错 |
+| `rsync error: some files vanished` (exit 24) | 文件在传输中被移走 | 正常现象；脚本视为 WARN 不报错 |
 | `rsync: partial transfer` (exit 23) | 部分文件因错误无法传输 | 通常非致命；脚本视为 WARN；下次 sync 会补齐 |
 | 同步后 Syncthing 未分发到副电脑 | Syncthing 暂停 / Receive Only 冲突 | 检查 Syncthing Web UI |
 | 文件时间戳不对 | rsync 没加 `-t` | 脚本已含 `-avz`（`-a` 包含 `-t`） |

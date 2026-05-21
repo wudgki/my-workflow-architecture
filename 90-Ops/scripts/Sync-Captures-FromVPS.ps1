@@ -9,19 +9,18 @@
     Uses rsync over SSH with key-based auth. Does NOT push any data back
     to VPS (read-only pull).
 
-    After sync, Syncthing handles distribution to secondary machines
-    via the existing AI-Workspace - Inbox share.
-
     rsync resolution order:
       1. -RsyncPath parameter (explicit override)
       2. Get-Command rsync (already in PATH)
-      3. Git for Windows bundled rsync (C:\Program Files\Git\usr\bin\rsync.exe)
-      4. Fail with actionable error message
+      3. Git for Windows bundled: C:\Program Files\Git\usr\bin\rsync.exe
+      4. MSYS2 bundled: C:\msys64\usr\bin\rsync.exe
+      5. Fail with actionable error message
 
-    Path format:
-      Git/MSYS rsync requires MSYS-style paths (/d/... instead of D:\...).
-      This script auto-converts Windows paths to MSYS format when using
-      Git/MSYS rsync.
+    SSH resolution order (when MSYS rsync detected):
+      1. -SshPath parameter (explicit override)
+      2. MSYS2 ssh: C:\msys64\usr\bin\ssh.exe
+      3. Git ssh: C:\Program Files\Git\usr\bin\ssh.exe
+      4. Fallback to system ssh (may cause code 12 with MSYS rsync)
 
 .PARAMETER VpsHost
     SSH host for the VPS (e.g. user@1.2.3.4 or a ~/.ssh/config alias).
@@ -30,7 +29,7 @@
     Remote directory to sync from (default: /data/inbox/Telegram-Captures/).
 
 .PARAMETER LocalPath
-    Local directory to sync to (default: D:\AI-Workspace\00-Inbox\Telegram-Captures\).
+    Local directory to sync to.
 
 .PARAMETER DryRun
     Show what would be transferred without actually copying.
@@ -39,23 +38,14 @@
     Path to the SSH private key (default: ~/.ssh/hermes-rsync-key).
 
 .PARAMETER RsyncPath
-    Explicit path to rsync executable (optional). Overrides auto-detection.
+    Explicit path to rsync executable (optional).
+
+.PARAMETER SshPath
+    Explicit path to ssh executable (optional). Use MSYS2 ssh with MSYS2 rsync.
 
 .EXAMPLE
-    .\Sync-Captures-FromVPS.ps1 -VpsHost hermes-vps
     .\Sync-Captures-FromVPS.ps1 -VpsHost root@1.2.3.4 -DryRun
-    .\Sync-Captures-FromVPS.ps1 -VpsHost root@1.2.3.4 -RsyncPath "C:\tools\rsync.exe"
-
-.NOTES
-    Requirements:
-      - rsync available (Git for Windows, WSL, scoop, or cwrsync)
-      - SSH key pair generated and deployed (see captures-sync-runbook.md)
-      - VPS authorized_keys configured with restrict + command limit
-
-    Security:
-      - Never logs SSH key content or passphrase
-      - Never writes to VPS (read-only pull)
-      - Preserves file timestamps for idempotent downstream processing
+    .\Sync-Captures-FromVPS.ps1 -VpsHost root@1.2.3.4 -RsyncPath "C:\msys64\usr\bin\rsync.exe" -SshPath "C:\msys64\usr\bin\ssh.exe"
 #>
 
 [CmdletBinding()]
@@ -71,6 +61,8 @@ param(
 
     [string]$RsyncPath = '',
 
+    [string]$SshPath = '',
+
     [switch]$DryRun
 )
 
@@ -78,102 +70,111 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # --- rsync resolution ---
-# Determines the path to the rsync executable and whether it is MSYS-based
-# (which requires path format conversion).
-
 $IsMsysRsync = $false
 $ResolvedRsync = ''
 
 if ($RsyncPath) {
-    # 1. Explicit parameter
     if (-not (Test-Path $RsyncPath)) {
         Write-Error "Specified -RsyncPath not found: $RsyncPath"
         exit 1
     }
     $ResolvedRsync = $RsyncPath
-    # Detect if this is an MSYS/Git rsync by checking the path
     if ($RsyncPath -match 'Git\\usr\\bin|msys|mingw') {
         $IsMsysRsync = $true
     }
 } elseif (Get-Command rsync -ErrorAction SilentlyContinue) {
-    # 2. Already in PATH
     $ResolvedRsync = (Get-Command rsync).Source
     if ($ResolvedRsync -match 'Git\\usr\\bin|msys|mingw') {
         $IsMsysRsync = $true
     }
 } elseif (Test-Path 'C:\Program Files\Git\usr\bin\rsync.exe') {
-    # 3. Git for Windows bundled rsync
     $ResolvedRsync = 'C:\Program Files\Git\usr\bin\rsync.exe'
     $IsMsysRsync = $true
-    Write-Host "[INFO] Using Git for Windows bundled rsync: $ResolvedRsync"
+} elseif (Test-Path 'C:\msys64\usr\bin\rsync.exe') {
+    $ResolvedRsync = 'C:\msys64\usr\bin\rsync.exe'
+    $IsMsysRsync = $true
 } else {
-    # 4. Not found anywhere
     Write-Error @"
 rsync not found. Install one of the following:
 
-  Option A (recommended): Git for Windows (includes rsync at C:\Program Files\Git\usr\bin\rsync.exe)
+  Option A: MSYS2 (recommended for this script)
+    pacman -S rsync openssh
+
+  Option B: Git for Windows
     https://git-scm.com/download/win
 
-  Option B: scoop install rsync
-    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-    Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
-    scoop install rsync
+  Option C: scoop install rsync
 
-  Option C: WSL (use 'wsl rsync ...' directly)
+  Option D: WSL (use 'wsl rsync ...' directly)
 
-  Option D: cwrsync (https://itefix.net/cwrsync)
-
-Or specify -RsyncPath explicitly:
-    .\Sync-Captures-FromVPS.ps1 -VpsHost <host> -RsyncPath "C:\path\to\rsync.exe"
+Or specify -RsyncPath explicitly.
 "@
     exit 1
 }
 
-# --- Path conversion for MSYS rsync ---
-# MSYS/Git rsync does not understand Windows paths like D:\foo\bar.
-# Convert to /d/foo/bar format for rsync's own arguments (local dest).
-#
-# IMPORTANT: The SSH -i key path must NOT use /c/Users/... format because
-# when MSYS2_ARG_CONV_EXCL=* is set, MSYS2 will not convert it back to a
-# Windows path that ssh.exe can open. Instead we use C:/Users/... format
-# (Windows path with forward slashes) which both MSYS ssh and native ssh
-# understand regardless of MSYS2_ARG_CONV_EXCL setting.
+Write-Host "[INFO] rsync resolved: $ResolvedRsync (MSYS=$IsMsysRsync)"
 
+# --- SSH resolution (for MSYS rsync) ---
+# MSYS rsync must use a compatible SSH binary. Win32-OpenSSH
+# (C:\Windows\System32\OpenSSH\ssh.exe) can cause 'connection
+# unexpectedly closed' (code 12) when paired with MSYS rsync.
+$ResolvedSsh = ''
+
+if ($IsMsysRsync) {
+    if ($SshPath) {
+        if (-not (Test-Path $SshPath)) {
+            Write-Error "Specified -SshPath not found: $SshPath"
+            exit 1
+        }
+        $ResolvedSsh = $SshPath
+    } elseif (Test-Path 'C:\msys64\usr\bin\ssh.exe') {
+        $ResolvedSsh = 'C:\msys64\usr\bin\ssh.exe'
+    } elseif (Test-Path 'C:\Program Files\Git\usr\bin\ssh.exe') {
+        $ResolvedSsh = 'C:\Program Files\Git\usr\bin\ssh.exe'
+    } else {
+        # Fallback to system ssh with a warning
+        $ResolvedSsh = 'ssh'
+        Write-Host "[WARN] No MSYS2/Git ssh.exe found. Using system ssh."
+        Write-Host "       If you get code 12, install MSYS2 OpenSSH:"
+        Write-Host "         pacman -S openssh"
+        Write-Host "       Or specify -SshPath explicitly."
+    }
+    Write-Host "[INFO] SSH resolved: $ResolvedSsh"
+}
+
+# --- Path conversion helpers ---
 function ConvertTo-MsysPath {
     param([string]$WinPath)
-    # Resolve to absolute path first
     $resolved = [System.IO.Path]::GetFullPath($WinPath)
-    # D:\foo\bar -> /d/foo/bar
     if ($resolved -match '^([A-Za-z]):\\(.*)$') {
         $drive = $Matches[1].ToLower()
         $rest = $Matches[2] -replace '\\', '/'
         return "/$drive/$rest"
     }
-    # Already unix-style or UNC, return as-is
     return $resolved -replace '\\', '/'
 }
 
 function ConvertTo-ForwardSlashPath {
     param([string]$WinPath)
-    # Resolve to absolute then just replace backslashes with forward slashes.
-    # Result: C:/Users/Administrator/.ssh/hermes-rsync-key
-    # This format is understood by both MSYS ssh and native Windows ssh.
     $resolved = [System.IO.Path]::GetFullPath($WinPath)
     return $resolved -replace '\\', '/'
 }
 
+# --- Convert paths for MSYS rsync ---
 $RsyncLocalPath = $LocalPath
 $RsyncSshKeyPath = $SshKeyPath
+$RsyncSshExePath = ''
 
 if ($IsMsysRsync) {
-    # Local destination path: use MSYS format (/d/...) for rsync
     $RsyncLocalPath = ConvertTo-MsysPath $LocalPath
-    # SSH key path: use Windows-with-forward-slashes (C:/...) for ssh -i
-    # This works with MSYS2_ARG_CONV_EXCL=* because ssh sees a real Windows path.
+    # SSH key: C:/Users/... format (works with MSYS2_ARG_CONV_EXCL=*)
     $RsyncSshKeyPath = ConvertTo-ForwardSlashPath $SshKeyPath
-    Write-Host "[INFO] MSYS rsync detected; converted paths:"
-    Write-Host "       LocalPath -> $RsyncLocalPath"
+    # SSH exe: C:/msys64/... format for the -e argument
+    $RsyncSshExePath = ConvertTo-ForwardSlashPath $ResolvedSsh
+    Write-Host "[INFO] MSYS rsync path conversions:"
+    Write-Host "       LocalPath  -> $RsyncLocalPath"
     Write-Host "       SshKeyPath -> $RsyncSshKeyPath"
+    Write-Host "       SshExe     -> $RsyncSshExePath"
 }
 
 # --- Validation ---
@@ -188,11 +189,18 @@ if (-not (Test-Path $LocalPath)) {
 }
 
 # --- Build rsync command ---
+# Build the -e (remote shell) argument with the resolved SSH path + key.
+if ($IsMsysRsync) {
+    $sshCmd = "`"$RsyncSshExePath`" -i `"$RsyncSshKeyPath`" -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+} else {
+    $sshCmd = "ssh -i `"$SshKeyPath`" -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+}
+
 $rsyncArgs = @(
     '-avz'
     '--progress'
     '--timeout=30'
-    '-e', "ssh -i `"$RsyncSshKeyPath`" -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
+    '-e', $sshCmd
     "${VpsHost}:${RemotePath}"
     $RsyncLocalPath
 )
@@ -204,14 +212,11 @@ if ($DryRun) {
 
 # --- Execute ---
 Write-Host "[INFO] Syncing: ${VpsHost}:${RemotePath} -> ${LocalPath}"
-Write-Host "[INFO] rsync: $ResolvedRsync"
-Write-Host "[INFO] SSH key: $SshKeyPath"
+Write-Host "[INFO] rsync -e: $sshCmd"
 
 # MSYS2 auto-converts arguments that look like Unix paths (starting with /).
-# This mangles the remote path (e.g. /data/inbox/... becomes C:/msys64/data/...).
-# Setting MSYS2_ARG_CONV_EXCL="*" disables all argument conversion for the
-# rsync call. We already pre-converted LocalPath and SshKeyPath to MSYS format
-# above, so blanket exclusion is safe and prevents remote path corruption.
+# Setting MSYS2_ARG_CONV_EXCL="*" disables all argument conversion.
+# We already pre-converted all local paths above.
 $savedMsys2ArgConvExcl = $env:MSYS2_ARG_CONV_EXCL
 
 $startTime = Get-Date
@@ -223,7 +228,6 @@ try {
     & $ResolvedRsync @rsyncArgs
     $exitCode = $LASTEXITCODE
 } finally {
-    # Restore previous value (may be $null if was not set).
     $env:MSYS2_ARG_CONV_EXCL = $savedMsys2ArgConvExcl
 }
 $elapsed = (Get-Date) - $startTime
@@ -231,12 +235,9 @@ $elapsed = (Get-Date) - $startTime
 if ($exitCode -eq 0) {
     Write-Host "[OK] Sync completed in $([math]::Round($elapsed.TotalSeconds, 1))s"
 } elseif ($exitCode -eq 23) {
-    # Exit 23: Partial transfer due to error (some files could not be transferred)
-    Write-Host "[WARN] Partial transfer due to error (exit 23). Some files could not be transferred. This is usually non-fatal for a live inbox."
+    Write-Host "[WARN] Partial transfer due to error (exit 23). Non-fatal for live inbox."
 } elseif ($exitCode -eq 24) {
-    # Exit 24: Partial transfer due to vanished source files (normal for live inbox
-    # where bridge-ingress may be writing new .tmp files that disappear before rsync finishes)
-    Write-Host "[WARN] Partial transfer due to vanished source files (exit 24). Files were created/removed during sync. This is normal."
+    Write-Host "[WARN] Partial transfer, vanished source files (exit 24). Normal for live inbox."
 } else {
     Write-Error "rsync failed with exit code $exitCode"
     exit $exitCode

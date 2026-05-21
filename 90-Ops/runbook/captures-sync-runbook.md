@@ -27,8 +27,89 @@ VPS /data/inbox/Telegram-Captures/
 ## 前置条件
 
 - [ ] bridge-ingress 已在 VPS 上运行并落盘
-- [ ] 主电脑已安装 rsync（WSL / Git Bash / scoop 均可）
+- [ ] 主电脑已安装 rsync（见下方安装指南）
 - [ ] 主电脑可通过 SSH 连接 VPS
+
+---
+
+## rsync Windows 安装指南
+
+Windows 原生不自带 rsync，推荐以下方案（按优先级排列）：
+
+### 方案 A：Git for Windows 自带的 rsync（推荐）
+
+如果你已安装 Git for Windows（大概率已有），它自带 MSYS2 环境中的 rsync。
+
+验证：
+
+```powershell
+& "C:\Program Files\Git\usr\bin\rsync.exe" --version
+```
+
+如果输出版本号，直接用。把脚本中的 `rsync` 改为完整路径，或把
+`C:\Program Files\Git\usr\bin\` 加入 `$env:PATH`：
+
+```powershell
+$env:PATH = "C:\Program Files\Git\usr\bin;" + $env:PATH
+rsync --version
+```
+
+> ⚠️ 注意：Git for Windows 的 rsync 版本可能较旧（3.2.x），但对本场景
+> （纯文本 .md 文件增量拉取）完全够用。
+
+### 方案 B：WSL（Windows Subsystem for Linux）
+
+如果你已装了 WSL（Ubuntu / Debian），rsync 是内置的：
+
+```bash
+# 在 WSL 中
+rsync --version    # 通常 3.2+ 已可用
+# 如果没有：
+sudo apt install rsync
+```
+
+从 PowerShell 调用 WSL rsync：
+
+```powershell
+wsl rsync -avz -e "ssh -i ~/.ssh/hermes-rsync-key" root@<VPS_IP>:/data/inbox/Telegram-Captures/ /mnt/d/AI-Workspace/00-Inbox/Telegram-Captures/
+```
+
+> 注意路径转换：Windows `D:\` 在 WSL 里是 `/mnt/d/`。
+
+### 方案 C：Scoop 包管理器安装
+
+```powershell
+# 安装 scoop（如果还没有）
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+
+# 安装 rsync
+scoop install rsync
+rsync --version
+```
+
+Scoop 的 rsync 来自 MSYS2 编译，兼容性好，自动加入 PATH。
+
+### 方案 D：cwrsync（独立安装包）
+
+从 [https://itefix.net/cwrsync](https://itefix.net/cwrsync) 下载免费版。
+解压后把 `bin\` 目录加入 PATH。适合不想装 Git / WSL / Scoop 的环境。
+
+### 选哪个？
+
+| 你的环境 | 推荐 |
+|---|---|
+| 已有 Git for Windows | 方案 A（零安装） |
+| 已有 WSL Ubuntu | 方案 B（零安装，但路径需转换） |
+| 喜欢包管理器 | 方案 C（scoop，一行命令） |
+| 只想最小依赖 | 方案 D（独立 zip 解压） |
+
+安装后验证：
+
+```powershell
+rsync --version
+# 期望输出：rsync  version 3.x.x  protocol version 31+
+```
 
 ---
 
